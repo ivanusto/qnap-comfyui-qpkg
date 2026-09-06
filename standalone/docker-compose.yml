@@ -1,0 +1,121 @@
+# ComfyUI for QNAP Container Station, as a standalone application.
+#
+# Paste this into Container Station: Applications, Create, and give it a name.
+# Nothing has to be prepared on the NAS first. The image is built on your own
+# machine on first start, which takes 15 to 30 minutes and needs internet
+# access. Every directory below is created automatically.
+#
+# ---------------------------------------------------------------------------
+# BEFORE YOU START, CHECK THREE THINGS
+# ---------------------------------------------------------------------------
+#
+# 1. The NVIDIA GPU Driver package is installed and enabled, and note the CUDA
+#    version it reports. Over SSH:
+#
+#      DRV=$(getcfg NVIDIA_GPU_DRV Install_Path -f /etc/config/qpkg.conf)
+#      LD_LIBRARY_PATH=$DRV/usr/nvidia $DRV/usr/bin/nvidia-smi
+#
+#    If it reports CUDA older than 12.9, change the four TORCH_ lines below.
+#    Driver CUDA 12.1 to 12.5 use cu121, 12.6 to 12.8 use cu126, 12.9 or newer
+#    keep cu128. The three version pins must stay on matching releases.
+#
+# 2. The GPU runtime name. It is nvidia-runtime on Container Station, not the
+#    usual nvidia. Confirm with:
+#
+#      $(getcfg container-station Install_Path -f /etc/config/qpkg.conf)/bin/docker info | grep Runtimes
+#
+# 3. Your storage pool name. /share/CACHEDEV1_DATA below is the common one, but
+#    QuTS hero uses ZFS<n>_DATA. Check with:
+#
+#      readlink -f /share/Container ; readlink -f /share/Public
+#
+#    Then replace every /share/CACHEDEV1_DATA in this file. Do not use
+#    /share/Container or /share/Public directly: those are symlinks and /share
+#    itself is a tmpfs.
+# ---------------------------------------------------------------------------
+
+services:
+  comfyui:
+    build:
+      # Built straight from the repository tarball, so there is nothing to
+      # download or unpack on the NAS by hand. Change main to a tag to pin a
+      # version, remembering to change it in the dockerfile line as well.
+      context: https://github.com/ivanusto/qnap-comfyui-qpkg/archive/refs/heads/main.tar.gz
+      dockerfile: qnap-comfyui-qpkg-main/standalone/Dockerfile
+      args:
+        COMFY_REF: v0.34.3
+        TORCH_INDEX: https://download.pytorch.org/whl/cu128
+        TORCH_VERSION: 2.9.1+cu128
+        TORCHVISION_VERSION: 0.24.1+cu128
+        TORCHAUDIO_VERSION: 2.9.1+cu128
+    image: comfyui-standalone:v0.34.3
+    container_name: comfyui
+    restart: unless-stopped
+
+    # See check 2 above. Do not replace this with
+    # deploy.resources.reservations.devices: Compose turns that into a device
+    # request carrying Driver: "nvidia", which matches nothing here.
+    runtime: nvidia-runtime
+
+    environment:
+      # Neither of these is optional. The runtime hook reads NVIDIA_VISIBLE_
+      # DEVICES to decide what to expose, and unset behaves as "void" so the
+      # container sees no GPU. With only "utility" in the capabilities you get
+      # a working nvidia-smi but no libcuda.so.1, and torch quietly reports
+      # CUDA as unavailable.
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TZ=UTC
+
+    ports:
+      - "8188:8188"
+
+    # QNAP's admin account is uid 0 and everyone is gid 100. Change this if you
+    # would rather not run as root, remembering to chown the directories below.
+    user: "0:100"
+
+    # A guard rail, not a tuning knob. cgroup counts mmap page cache against
+    # this, but that memory is reclaimable, so exceeding the limit triggers
+    # reclaim rather than an OOM kill. Setting it too low is actively harmful:
+    # it evicts the model's page cache and sends every sampling step back to
+    # disk. Put it above the RAM you actually have free.
+    mem_limit: 26g
+    memswap_limit: 50g
+    shm_size: 2gb
+
+    # If this NAS runs watchtower, it updates every container by default.
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+
+    volumes:
+      # Editable settings. extra_model_paths.yaml is written here on first run.
+      - /share/CACHEDEV1_DATA/Container/comfyui/config:/config
+      - /share/CACHEDEV1_DATA/Container/comfyui/custom_nodes:/opt/ComfyUI/custom_nodes
+      - /share/CACHEDEV1_DATA/Container/comfyui/user:/opt/ComfyUI/user
+      - /share/CACHEDEV1_DATA/Container/comfyui/pip-extra:/opt/pip-extra
+      - /share/CACHEDEV1_DATA/Container/comfyui/output:/output
+      - /share/CACHEDEV1_DATA/Container/comfyui/input:/input
+      - /share/CACHEDEV1_DATA/Container/comfyui/temp:/temp
+      - /share/CACHEDEV1_DATA/Container/comfyui/models-local:/models/local
+      # Your model library, read only. Point this wherever you keep weights.
+      - /share/CACHEDEV1_DATA/Public/models:/models/public:ro
+
+    command:
+      - --listen
+      - "0.0.0.0"
+      - --port
+      - "8188"
+      - --output-directory
+      - /output
+      - --input-directory
+      - /input
+      - --temp-directory
+      - /temp
+      # GB of VRAM held back for the driver. Raise this if you hit OOM.
+      - --reserve-vram
+      - "0.5"
+      # Deliberately absent, see docs/HARDWARE-NOTES.md in the repository:
+      #   --lowvram    a no-op while DynamicVRAM is enabled
+      #   --highvram / --gpu-only / --novram / --cpu   each disables DynamicVRAM
+      #   --fast-disk  streams weights from disk every step
+      #   --supports-fp8-compute   claims a capability your card may not have
