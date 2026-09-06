@@ -1,19 +1,22 @@
 #!/bin/sh
 # ComfyUI QPKG service script.
 #
-# 這裡刻意不用官方 containerized-qpkg 範例的 system-docker-compose，實測它壞在兩處：
-#   1. system-docker 是個 wrapper，basename 為 system-docker-compose 時會 exec
-#      "docker-compose"（Compose v1 的獨立二進位名），而 Container Station 3.x 的
-#      compose 是 CLI plugin，只能用 "docker compose" 子命令，沒有那個檔。
-#   2. 它會把 DOCKER_HOST 指到 /var/run/system-docker.sock，那是另一個 daemon。
-#      使用者的容器全在 /var/run/docker.sock 上，走錯 daemon 會看不到彼此。
-# 所以直接用 Container Station 自己的 docker 二進位，不經 wrapper。
+# This deliberately avoids the system-docker-compose wrapper used by QNAP's own
+# containerized-qpkg sample, which is broken here in two ways:
+#   1. system-docker execs "docker-compose", the Compose v1 standalone binary
+#      name. Container Station 3.x ships Compose as a CLI plugin, so that file
+#      does not exist and only "docker compose" works.
+#   2. It points DOCKER_HOST at /var/run/system-docker.sock, a second daemon.
+#      User containers live on /var/run/docker.sock, so the two cannot see each
+#      other.
+# So call Container Station's own docker binary directly.
 
 CONF=/etc/config/qpkg.conf
 QPKG_NAME="ComfyUI"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
 
-# Container Station 的安裝路徑因機器而異，先問 qpkg.conf，問不到再掃 /share。
+# Container Station's install path varies by machine. Ask qpkg.conf first, then
+# fall back to scanning /share.
 QCS_DIR=$(/sbin/getcfg container-station Install_Path -f ${CONF})
 if [ -z "$QCS_DIR" ] || [ ! -d "$QCS_DIR" ]; then
     for d in /share/*/.qpkg/container-station; do
@@ -22,15 +25,16 @@ if [ -z "$QCS_DIR" ] || [ ! -d "$QCS_DIR" ]; then
 fi
 DOCKER="$QCS_DIR/bin/docker"
 
-# 由 package_routines 的 pkg_post_install 改寫成實際路徑。
+# Rewritten to the real path by pkg_post_install.
 STACK=__STACK_PATH__
 
 COMPOSE_FILE="$STACK/docker-compose.yml"
 LOG="$STACK/logs/qpkg.log"
 
 export QNAP_QPKG=$QPKG_NAME
-# docker CLI 會想在 $HOME 底下建設定目錄。預設的 HOME 通常落在
-# container-station/homes/ 之下且不可寫，會直接以 permission denied 收場。
+# The docker CLI wants to create a config directory under $HOME. The default
+# HOME usually lands under container-station/homes/ and is not writable, which
+# fails outright with permission denied.
 export HOME="$STACK"
 export DOCKER_CONFIG="$STACK/.docker"
 
@@ -43,25 +47,26 @@ image_name() {
 }
 
 preflight() {
-    [ -x "$DOCKER" ] || { log "找不到 docker：$DOCKER"; return 1; }
-    [ -f "$COMPOSE_FILE" ] || { log "找不到 compose 檔：$COMPOSE_FILE"; return 1; }
-    [ -f "$STACK/.env" ] || { log "找不到 .env，安裝可能未完成：$STACK/.env"; return 1; }
+    [ -x "$DOCKER" ] || { log "docker not found at $DOCKER"; return 1; }
+    [ -f "$COMPOSE_FILE" ] || { log "compose file not found: $COMPOSE_FILE"; return 1; }
+    [ -f "$STACK/.env" ] || { log ".env missing, install may be incomplete: $STACK/.env"; return 1; }
 
-    # 開機後 NVIDIA 核心模組要好幾分鐘才載入（實測某機種是第 345 秒），
-    # dockerd 也要時間。這裡最多等 600 秒，比直接失敗有用得多。
+    # The NVIDIA kernel modules can take minutes to load after a reboot (345
+    # seconds on the reference machine) and dockerd comes up later still. Wait
+    # up to 600 seconds; that is far more useful than failing immediately.
     RT=$(sed -n 's/^COMFY_GPU_RUNTIME=//p' "$STACK/.env" 2>/dev/null | head -1)
     [ -n "$RT" ] || RT=nvidia-runtime
     i=0
     while [ $i -lt 60 ]; do
         if [ -c /dev/nvidia0 ] && $DOCKER info 2>/dev/null | grep -q "$RT"; then
-            [ $i -gt 0 ] && log "等待 GPU 與 docker 就緒花了 $((i * 10)) 秒"
+            [ $i -gt 0 ] && log "waited $((i * 10))s for the GPU and docker to come up"
             return 0
         fi
         i=$((i + 1))
         sleep 10
     done
-    [ -c /dev/nvidia0 ] || log "逾時：/dev/nvidia0 不存在，NVIDIA GPU Driver 可能未啟用"
-    $DOCKER info 2>/dev/null | grep -q "$RT" || log "逾時：docker 未註冊 runtime「$RT」"
+    [ -c /dev/nvidia0 ] || log "timeout: /dev/nvidia0 missing, is the NVIDIA GPU Driver package enabled?"
+    $DOCKER info 2>/dev/null | grep -q "$RT" || log "timeout: docker has no runtime named '$RT'"
     return 1
 }
 
@@ -73,17 +78,19 @@ case "$1" in
         exit 1
     fi
     mkdir -p "$STACK/logs"
-    preflight || { echo "preflight 失敗，詳見 $LOG"; exit 1; }
+    preflight || { echo "preflight failed, see $LOG"; exit 1; }
 
-    # 映像不隨 QPKG 打包：約 9 GB 的 docker save tar 會讓套件過大，安裝時還要
-    # 解壓再 load，對 Container Station 的 docker volume 空間與安裝逾時都是壓力。
-    # 改為首次啟動時就地建置，需要能連外網下載 pip 套件。
+    # The image is not shipped inside the QPKG. A docker save tarball of roughly
+    # 9 GB would make the package unwieldy and would have to be unpacked and
+    # loaded during install, which strains both the Container Station docker
+    # volume and the install timeout. Build in place instead, which needs
+    # internet access on first start.
     IMG=$(image_name)
     if ! $DOCKER image inspect "$IMG" >/dev/null 2>&1; then
-        log "映像 $IMG 不存在，開始建置（預估 15 至 30 分鐘）"
+        log "image $IMG not present, building (expect 15 to 30 minutes)"
         $DOCKER compose -f "$COMPOSE_FILE" build >> "$LOG" 2>&1 \
-            || { log "建置失敗，詳見 $LOG"; exit 1; }
-        log "建置完成"
+            || { log "build failed, see $LOG"; exit 1; }
+        log "build complete"
     fi
 
     log "compose up"
@@ -101,9 +108,9 @@ case "$1" in
     ;;
 
   remove)
-    # 只移除容器與本地建置的映像，絕不碰 $STACK 底下的
-    # output、user、models-local、custom_nodes。
-    log "remove：清掉容器與映像，保留資料"
+    # Remove the container and the locally built image only. Never touch
+    # output, user, models-local or custom_nodes under $STACK.
+    log "remove: dropping container and image, keeping data"
     $DOCKER compose -f "$COMPOSE_FILE" down --rmi local >> "$LOG" 2>&1
     ;;
 
