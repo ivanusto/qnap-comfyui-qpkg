@@ -1,0 +1,89 @@
+# ComfyUI on QNAP Container Station, with an NVIDIA GPU passed through.
+#
+# 所有路徑都來自同目錄的 .env，由 package_routines 在安裝時產生。
+# 不要在這裡寫死 /share/CACHEDEV1_DATA 或 /share/ZFS<n>_DATA 這類儲存池名稱：
+# 每台 NAS 的池名都不一樣，而 /share/Container 與 /share/Public 是符號連結，
+# /share 本身還是 tmpfs，所以要在安裝時用 readlink -f 解析成實體路徑。
+name: comfyui
+
+services:
+  comfyui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COMFY_REF: ${COMFY_REF:-v0.34.3}
+        TORCH_INDEX: ${TORCH_INDEX:-https://download.pytorch.org/whl/cu128}
+        TORCH_VERSION: ${TORCH_VERSION:-2.9.1+cu128}
+        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.24.1+cu128}
+        TORCHAUDIO_VERSION: ${TORCHAUDIO_VERSION:-2.9.1+cu128}
+    image: comfyui-nas:${COMFY_REF:-v0.34.3}
+    container_name: comfyui
+    restart: unless-stopped
+
+    # Container Station 註冊的 runtime 名稱是 nvidia-runtime，不是常見的 nvidia。
+    # 也不要用 deploy.resources.reservations.devices：compose 會帶 Driver: "nvidia"
+    # 去查一個不存在的名字，而且 compose v2 在非 swarm 下對 deploy 支援有限。
+    # 若你的機器叫別的名字，用 docker info | grep Runtimes 查出來改這裡。
+    runtime: ${COMFY_GPU_RUNTIME:-nvidia-runtime}
+
+    environment:
+      # 這兩個不是選配。nvidia-container-runtime 的 config.toml 把
+      # accept-nvidia-visible-devices-envvar-when-unprivileged 留在預設 true，
+      # hook 靠環境變數決定曝露哪些裝置，不設就等同 void，容器內看不到 GPU。
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      # 只給 utility 會有 nvidia-smi 但沒有 libcuda.so.1，torch 靜靜回報 CUDA 不可用。
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TZ=${TZ:-UTC}
+      - COMFY_DIR=/opt/ComfyUI
+
+    ports:
+      - "${COMFY_PORT:-8188}:8188"
+
+    # NAS 上的使用者與群組，讓輸出檔案歸屬正確。安裝時自動填入。
+    user: "${PUID:-1000}:${PGID:-100}"
+
+    # 護欄而非調校旋鈕。cgroup 會把 mmap 的 page cache 計入上限，但那是可回收
+    # 記憶體，超限觸發回收而非 OOM kill。上限訂太低反而會不斷驅逐模型的
+    # page cache，害每一步都回頭讀磁碟。訂在實際可用 RAM 之上即可。
+    mem_limit: ${COMFY_MEM_LIMIT:-26g}
+    memswap_limit: ${COMFY_MEMSWAP_LIMIT:-50g}
+    shm_size: ${COMFY_SHM_SIZE:-2gb}
+
+    # 若這台 NAS 裝了 watchtower，它預設會無過濾地更新所有容器。
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+
+    volumes:
+      - ${COMFY_STACK}/ComfyUI:/opt/ComfyUI
+      - ${COMFY_STACK}/custom_nodes:/opt/ComfyUI/custom_nodes
+      - ${COMFY_STACK}/user:/opt/ComfyUI/user
+      - ${COMFY_STACK}/extra_model_paths.yaml:/opt/ComfyUI/extra_model_paths.yaml:ro
+      - ${COMFY_STACK}/pip-extra:/opt/pip-extra
+      - ${COMFY_STACK}/output:/output
+      - ${COMFY_STACK}/input:/input
+      - ${COMFY_STACK}/temp:/temp
+      - ${COMFY_STACK}/models-local:/models/local
+      # 共用模型庫，唯讀。要再掛第二個模型 root 就在這裡加一行，
+      # 並在 extra_model_paths.yaml 補上對應的 base_path。
+      - ${COMFY_MODELS_SHARED}:/models/public:ro
+
+    command:
+      - --listen
+      - "0.0.0.0"
+      - --port
+      - "8188"
+      - --output-directory
+      - /output
+      - --input-directory
+      - /input
+      - --temp-directory
+      - /temp
+      # GPU 獨佔時只留少量給驅動。顯存吃緊就調高到 1.0。
+      - --reserve-vram
+      - "${COMFY_RESERVE_VRAM:-0.5}"
+      # 刻意不加的旗標，理由見 docs/HARDWARE-NOTES.md：
+      #   --lowvram    DynamicVRAM 開啟時是無操作
+      #   --highvram / --gpu-only / --novram / --cpu   會關掉 DynamicVRAM
+      #   --fast-disk  模型放在機械碟或分層池時會癱瘓
+      #   --supports-fp8-compute   對沒有原生 fp8 的卡是謊報能力

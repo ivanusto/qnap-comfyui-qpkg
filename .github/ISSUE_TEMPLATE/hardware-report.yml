@@ -1,0 +1,70 @@
+name: Hardware report
+description: Tell us whether the package worked on your NAS
+title: "[hardware] <NAS model> + <GPU>"
+labels: ["hardware-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Failures are more useful than successes, so please file this
+        either way. Every command below is read only.
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Installs but ComfyUI does not start
+        - Package will not install
+        - GPU not detected inside the container
+        - Other failure
+    validations:
+      required: true
+
+  - type: input
+    id: nas
+    attributes:
+      label: NAS model
+      placeholder: "TS-873A, TVS-h874, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: facts
+    attributes:
+      label: System facts
+      description: Paste the output of the block below, run over SSH on the NAS.
+      render: shell
+      value: |
+        # paste output here
+      placeholder: |
+        grep -m1 'model name' /proc/cpuinfo
+        grep -o -m1 avx2 /proc/cpuinfo || echo "no avx2"
+        cat /etc/os-release | grep VERSION=
+        getcfg container-station Version -f /etc/config/qpkg.conf
+        DRV=$(getcfg NVIDIA_GPU_DRV Install_Path -f /etc/config/qpkg.conf)
+        LD_LIBRARY_PATH=$DRV/usr/nvidia $DRV/usr/bin/nvidia-smi \
+          --query-gpu=name,compute_cap,memory.total,driver_version --format=csv
+        $(getcfg container-station Install_Path -f /etc/config/qpkg.conf)/bin/docker info | grep -E 'Runtimes|Storage Driver'
+        free -m | head -2
+        readlink -f /share/Container
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        From `<Container>/comfyui/logs/qpkg.log` and, if the container started,
+        `docker logs comfyui`. Trim to the interesting part.
+      render: shell
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything you had to change
+      description: |
+        Edits to `.env`, a different CUDA wheel index, a different runtime name,
+        and so on.

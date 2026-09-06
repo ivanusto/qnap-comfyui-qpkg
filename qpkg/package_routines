@@ -1,0 +1,118 @@
+#!/bin/sh
+# ComfyUI QPKG 的安裝與移除鉤子。
+#
+# 設計原則：套件本身無狀態，所有資料都在 <Container 共享資料夾>/comfyui。
+# 重裝或升級套件不會動到既有的 output、user、models-local 與 custom_nodes，
+# 也不會覆蓋使用者改過的 compose 或 yaml。
+
+COMFY_REF="v0.34.3"
+
+# /share 是 tmpfs，/share/Container 與 /share/Public 是指向 <池>_DATA/<資料夾>
+# 的符號連結。每台 NAS 的儲存池名稱都不同（CACHEDEV1_DATA、ZFS<n>_DATA 等），
+# 所以絕不能寫死，一律在安裝時解析。
+# 注意 readlink 在 QTS 上是 /usr/bin/readlink 不是 /bin/readlink；
+# 寫錯路徑再把 stderr 丟掉，就會安靜地退回 fallback，看起來一切正常。
+resolve_share() {
+    _p=$(/usr/bin/readlink -f "/share/$1")
+    if [ -d "$_p" ]; then
+        echo "$_p"
+    else
+        echo "/share/$1"
+    fi
+}
+
+pkg_post_install() {
+    STACK="$(resolve_share Container)/comfyui"
+    PUBLIC="$(resolve_share Public)"
+    MODELS_SHARED="$PUBLIC/models"
+
+    /bin/mkdir -p \
+        "$STACK/ComfyUI" "$STACK/custom_nodes" "$STACK/user" "$STACK/pip-extra" \
+        "$STACK/models-local/diffusion_models" "$STACK/models-local/text_encoders" \
+        "$STACK/models-local/vae" "$STACK/models-local/loras" \
+        "$STACK/models-local/unet" "$STACK/models-local/clip" \
+        "$STACK/output" "$STACK/input" "$STACK/temp" "$STACK/logs" "$STACK/.docker"
+
+    # 共用模型資料夾若不存在就建起來，否則 compose 的唯讀 bind 會失敗。
+    /bin/mkdir -p "$MODELS_SHARED"
+
+    # 已存在就不覆蓋，讓使用者的在地修改能存活升級。
+    for f in Dockerfile docker-compose.yml entrypoint.sh extra_model_paths.yaml; do
+        if [ ! -f "$STACK/$f" ]; then
+            /bin/cp "$SYS_QPKG_DIR/$f" "$STACK/$f"
+        fi
+    done
+    /bin/chmod +x "$STACK/entrypoint.sh"
+
+    # 執行身分沿用 admin 與 everyone 群組，這是 QNAP 套件的慣例，也保證
+    # 寫得進使用者選的任何共享資料夾。注意 everyone 是「群組」不是使用者，
+    # id -g everyone 一定失敗，要直接查 /etc/group。
+    PUID=$(awk -F: '$1=="admin"{print $3}' /etc/passwd 2>/dev/null)
+    [ -n "$PUID" ] || PUID=0
+    PGID=$(awk -F: '$1=="everyone"{print $3}' /etc/group 2>/dev/null)
+    [ -n "$PGID" ] || PGID=100
+
+    # 所有會因機器而異的值集中在 .env，compose 只讀變數不寫死路徑。
+    # 已存在就不覆蓋，使用者調過的設定要活下來。
+    if [ ! -f "$STACK/.env" ]; then
+        {
+            echo "# 由 ComfyUI QPKG 於安裝時產生。改完請重啟套件。"
+            echo "COMFY_REF=$COMFY_REF"
+            echo "COMFY_STACK=$STACK"
+            echo "COMFY_MODELS_SHARED=$MODELS_SHARED"
+            echo "COMFY_PORT=8188"
+            echo "# 容器的執行身分。QNAP 的 admin 是 uid 0，所以預設是 root。"
+            echo "# 想改成非 root，填一個存在的 uid，並把 stack 目錄 chown 過去。"
+            echo "PUID=$PUID"
+            echo "PGID=$PGID"
+            echo "TZ=$(/sbin/getcfg System 'Time Zone' -d UTC -f /etc/config/uLinux.conf 2>/dev/null || echo UTC)"
+            echo ""
+            echo "# GPU。runtime 名稱用 docker info | grep Runtimes 查。"
+            echo "COMFY_GPU_RUNTIME=nvidia-runtime"
+            echo "NVIDIA_VISIBLE_DEVICES=all"
+            echo ""
+            echo "# 顯存吃緊就調高，單位是 GB。"
+            echo "COMFY_RESERVE_VRAM=0.5"
+            echo ""
+            echo "# 記憶體護欄，訂在實際可用 RAM 之上即可，不是調校旋鈕。"
+            echo "COMFY_MEM_LIMIT=26g"
+            echo "COMFY_MEMSWAP_LIMIT=50g"
+            echo "COMFY_SHM_SIZE=2gb"
+            echo ""
+            echo "# torch 輪子要對得上驅動的 CUDA 版本，對照表見 README。"
+            echo "TORCH_INDEX=https://download.pytorch.org/whl/cu128"
+            echo "TORCH_VERSION=2.9.1+cu128"
+            echo "TORCHVISION_VERSION=0.24.1+cu128"
+            echo "TORCHAUDIO_VERSION=2.9.1+cu128"
+        } > "$STACK/.env"
+    fi
+
+    # 把服務腳本裡的佔位符換成實際路徑。
+    /bin/sed -i "s#^STACK=__STACK_PATH__#STACK=$STACK#" "$SYS_QPKG_DIR/ComfyUI.sh"
+
+    # ComfyUI 原始碼走 bind mount，升級只要換 checkout 不必重建映像。
+    # QTS 上沒有 git，用 tarball；curl 在 /sbin 不在 /usr/bin。
+    if [ ! -f "$STACK/ComfyUI/main.py" ]; then
+        $CMD_WLOG "ComfyUI: 下載原始碼 $COMFY_REF" 4
+        /sbin/curl -fsSL -o /tmp/comfyui-src.tar.gz \
+            "https://codeload.github.com/comfyanonymous/ComfyUI/tar.gz/refs/tags/$COMFY_REF" \
+            >> "$STACK/logs/qpkg.log" 2>&1
+        /bin/tar -xzf /tmp/comfyui-src.tar.gz --strip-components=1 -C "$STACK/ComfyUI" \
+            >> "$STACK/logs/qpkg.log" 2>&1
+        /bin/rm -f /tmp/comfyui-src.tar.gz
+        # 內建的範例節點會被 custom_nodes 的 bind mount 遮蔽，先搬出來。
+        for n in websocket_image_save.py example_node.py.example; do
+            [ -f "$STACK/ComfyUI/custom_nodes/$n" ] && \
+                /bin/cp "$STACK/ComfyUI/custom_nodes/$n" "$STACK/custom_nodes/$n"
+        done
+    fi
+
+    /bin/chown -R "$PUID:$PGID" "$STACK"
+
+    $CMD_WLOG "ComfyUI 已安裝。資料目錄 $STACK，設定在 $STACK/.env。首次啟動會建置映像，約需 15 至 30 分鐘。" 4
+}
+
+pkg_pre_remove() {
+    STACK="$(resolve_share Container)/comfyui"
+    $CMD_WLOG "ComfyUI 移除中。資料目錄 $STACK 會保留，不會被刪除。" 4
+}

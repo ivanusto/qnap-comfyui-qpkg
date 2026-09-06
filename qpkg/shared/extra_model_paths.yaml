@@ -1,0 +1,50 @@
+# ComfyUI 的額外模型搜尋路徑。容器內的掛載點是固定的：
+#   /models/public  唯讀，指向 NAS 上的共用模型資料夾（compose 的 COMFY_MODELS_SHARED）
+#   /models/local   可寫，位於 stack 目錄底下的 models-local
+#
+# 三個不在官方文件裡、但會安靜影響結果的行為（folder_paths.py 佐證）：
+#
+# 1. diffusion_models 這個鍵內建就同時搜尋 models/diffusion_models 與 models/unet。
+#
+# 2. text_encoders 內建同時綁 models/text_encoders 與 models/clip，而 map_legacy
+#    又把 clip 這個鍵映射到 text_encoders。所以下面 text_encoders 與 clip 兩個鍵
+#    會合併成同一份清單，不是兩個獨立命名空間。
+#
+# 3. get_full_path 回傳第一個命中的路徑且沒有任何告警，get_filename_list_ 用 set
+#    去重，同名檔在下拉選單只出現一筆。常見的實際衝突是 clip_l.safetensors 在
+#    clip/ 與 text_encoders/ 底下是不同大小的兩個檔案，選錯不會有任何提示。
+#
+# 4. is_default: true 會讓載入器對每一條路徑呼叫 insert(0, ...)，
+#    所以多行清單的實際搜尋順序是反過來的，最後一行才是最高優先序。
+#    下面兩個多行區塊因此刻意倒著寫。改動時請一併驗證，方法見 docs/HARDWARE-NOTES.md。
+
+shared_models:
+    base_path: /models/public/
+    is_default: true
+    # 倒著寫。實際順序會是 diffusion_models/ 然後 unet/。
+    diffusion_models: |
+        unet/
+        diffusion_models/
+    # 倒著寫。實際順序會是 text_encoders/ 然後 clip/。
+    text_encoders: |
+        clip/
+        text_encoders/
+    vae: vae/
+    loras: loras/
+    controlnet: controlnet/
+    clip_vision: clip_vision/
+    embeddings: embeddings/
+    upscale_models: upscale_models/
+    style_models: style_models/
+    model_patches: model_patches/
+    configs: configs/
+
+# stack 目錄底下可寫的模型區，適合放 GGUF 之類自行下載的權重。
+local_models:
+    base_path: /models/local/
+    diffusion_models: diffusion_models/
+    text_encoders: text_encoders/
+    vae: vae/
+    loras: loras/
+    unet_gguf: unet/
+    clip_gguf: clip/

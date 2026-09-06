@@ -1,0 +1,4 @@
+.build-env/
+build/
+*.qpkg
+*.qpkg.md5
