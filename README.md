@@ -45,7 +45,21 @@ LD_LIBRARY_PATH=$DRV/usr/nvidia $DRV/usr/bin/nvidia-smi
 
 Note the reported **CUDA Version**. You need it in the next section.
 
-## Install
+## Two ways to install
+
+**As an App Center package.** Gives you a start and stop button, a tile that
+opens the web UI, and automatic start after a reboot. See below.
+
+**As a Container Station application.** Paste
+[standalone/docker-compose.yml](standalone/docker-compose.yml) into Container
+Station under Applications, Create. Nothing has to be prepared on the NAS
+first: the image builds on first start, and the directories and the default
+`extra_model_paths.yaml` are created for you. Edit the storage pool path, the
+CUDA wheel index and the GPU runtime name at the top of the file before you
+start. This route has no App Center integration, so you start and stop it in
+Container Station instead.
+
+## Install as a package
 
 1. Download the `.qpkg` from [Releases](../../releases), or build it yourself
    on the NAS with `sh build.sh` (requires the QDK package).
@@ -72,7 +86,7 @@ package. Keep `torch`, `torchvision` and `torchaudio` on matching releases; a
 mismatch fails at runtime with `undefined symbol: torch_library_impl` and not at
 install time.
 
-## Layout
+## Layout (package install)
 
 Everything lives under the **Container** shared folder, resolved at install time
 so it does not matter what your storage pool is called.

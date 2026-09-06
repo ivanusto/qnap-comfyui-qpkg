@@ -1,0 +1,71 @@
+    image: comfyui-standalone:v0.34.3
+    container_name: comfyui
+    restart: unless-stopped
+
+    # See check 2 above. Do not replace this with
+    # deploy.resources.reservations.devices: Compose turns that into a device
+    # request carrying Driver: "nvidia", which matches nothing here.
+    runtime: nvidia-runtime
+
+    environment:
+      # Neither of these is optional. The runtime hook reads NVIDIA_VISIBLE_
+      # DEVICES to decide what to expose, and unset behaves as "void" so the
+      # container sees no GPU. With only "utility" in the capabilities you get
+      # a working nvidia-smi but no libcuda.so.1, and torch quietly reports
+      # CUDA as unavailable.
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TZ=UTC
+
+    ports:
+      - "8188:8188"
+
+    # QNAP's admin account is uid 0 and everyone is gid 100. Change this if you
+    # would rather not run as root, remembering to chown the directories below.
+    user: "0:100"
+
+    # A guard rail, not a tuning knob. cgroup counts mmap page cache against
+    # this, but that memory is reclaimable, so exceeding the limit triggers
+    # reclaim rather than an OOM kill. Setting it too low is actively harmful:
+    # it evicts the model's page cache and sends every sampling step back to
+    # disk. Put it above the RAM you actually have free.
+    mem_limit: 26g
+    memswap_limit: 50g
+    shm_size: 2gb
+
+    # If this NAS runs watchtower, it updates every container by default.
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+
+    volumes:
+      # Editable settings. extra_model_paths.yaml is written here on first run.
+      - /share/CACHEDEV1_DATA/Container/comfyui/config:/config
+      - /share/CACHEDEV1_DATA/Container/comfyui/custom_nodes:/opt/ComfyUI/custom_nodes
+      - /share/CACHEDEV1_DATA/Container/comfyui/user:/opt/ComfyUI/user
+      - /share/CACHEDEV1_DATA/Container/comfyui/pip-extra:/opt/pip-extra
+      - /share/CACHEDEV1_DATA/Container/comfyui/output:/output
+      - /share/CACHEDEV1_DATA/Container/comfyui/input:/input
+      - /share/CACHEDEV1_DATA/Container/comfyui/temp:/temp
+      - /share/CACHEDEV1_DATA/Container/comfyui/models-local:/models/local
+      # Your model library, read only. Point this wherever you keep weights.
+      - /share/CACHEDEV1_DATA/Public/models:/models/public:ro
+
+    command:
+      - --listen
+      - "0.0.0.0"
+      - --port
+      - "8188"
+      - --output-directory
+      - /output
+      - --input-directory
+      - /input
+      - --temp-directory
+      - /temp
+      # GB of VRAM held back for the driver. Raise this if you hit OOM.
+      - --reserve-vram
+      - "0.5"
+      # Deliberately absent, see docs/HARDWARE-NOTES.md in the repository:
+      #   --lowvram    a no-op while DynamicVRAM is enabled
+      #   --highvram / --gpu-only / --novram / --cpu   each disables DynamicVRAM
+      #   --fast-disk  streams weights from disk every step
+      #   --supports-fp8-compute   claims a capability your card may not have

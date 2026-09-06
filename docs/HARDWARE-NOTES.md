@@ -218,3 +218,45 @@ on many models, `ZFS<n>_DATA` on QuTS hero. Never hard code either form.
 Container Station keeps its Docker data root on a fixed-size volume, 99 GB on
 the reference machine. The image alone is around 9 GB, so keep model weights on
 bind mounts and out of image layers.
+
+## 10. Building from a pasted compose file
+
+Two things block the obvious approaches to a paste-and-run compose file on
+QNAP, and both fail in ways that point somewhere else.
+
+A **git URL build context** does not work. BuildKit shells out to the host's
+git binary, and QTS does not ship one:
+
+```
+failed to init repo: exec: "git": executable file not found in $PATH
+```
+
+A **tarball URL build context** does work with `docker build -f`, but Compose
+mishandles the `dockerfile` key alongside a URL context. It concatenates the
+two into a path and reports:
+
+```
+open https:/github.com/.../main.tar.gz/subdir/Dockerfile: no such file
+```
+
+That leaves `dockerfile_inline`, which is what the standalone file uses. One
+trap comes with it: **Compose performs variable substitution across the whole
+compose file, including inside `dockerfile_inline`.** An unescaped `$PATH` or
+`${TORCH_INDEX}` in the embedded Dockerfile is replaced with an empty string
+before Docker ever sees it. The symptom is remote from the cause:
+
+```
+process "/bin/sh -c python -m venv /opt/venv" did not complete successfully: exit code: 127
+```
+
+Every dollar sign in the embedded Dockerfile therefore has to be doubled.
+`standalone/make-compose.py` regenerates the file and does the escaping, so
+edit `standalone/Dockerfile` and run that rather than hand editing the
+generated compose.
+
+One more constraint shapes the standalone file: **bind mounting a file that
+does not exist on the host makes Docker create a directory in its place**, and
+the container then fails to start. Every mount in the standalone compose is
+therefore a directory, and `extra_model_paths.yaml` is seeded into a mounted
+`/config` directory by the entrypoint on first run instead of being mounted
+directly.

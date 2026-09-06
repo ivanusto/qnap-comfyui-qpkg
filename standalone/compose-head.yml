@@ -1,0 +1,57 @@
+# ComfyUI for QNAP Container Station, as a standalone application.
+#
+# Paste this whole file into Container Station: Applications, Create, give it a
+# name. Nothing has to be prepared on the NAS first, and nothing is fetched
+# from anywhere except Docker Hub and PyPI. The image is built on your own
+# machine on first start, which takes 15 to 30 minutes. Every directory below
+# is created automatically.
+#
+# ---------------------------------------------------------------------------
+# EDIT THESE THREE THINGS FIRST
+# ---------------------------------------------------------------------------
+#
+# 1. Storage pool name. /share/CACHEDEV1_DATA below is the common one, but
+#    QuTS hero uses ZFS<n>_DATA. Over SSH:
+#
+#      readlink -f /share/Container ; readlink -f /share/Public
+#
+#    Replace every /share/CACHEDEV1_DATA in this file with what those print.
+#    Do not use /share/Container or /share/Public directly: they are symlinks
+#    and /share itself is a tmpfs.
+#
+# 2. CUDA version. Check what your driver reports:
+#
+#      DRV=$(getcfg NVIDIA_GPU_DRV Install_Path -f /etc/config/qpkg.conf)
+#      LD_LIBRARY_PATH=$DRV/usr/nvidia $DRV/usr/bin/nvidia-smi
+#
+#    If it says CUDA older than 12.9, change the four TORCH_ lines below.
+#    12.1 to 12.5 use cu121, 12.6 to 12.8 use cu126, 12.9 or newer keep cu128.
+#    The three version pins have to stay on matching releases: a mismatch
+#    fails at runtime with undefined symbol: torch_library_impl, not at build.
+#
+# 3. GPU runtime name. It is nvidia-runtime on Container Station, not the
+#    usual nvidia. Confirm with:
+#
+#      $(getcfg container-station Install_Path -f /etc/config/qpkg.conf)/bin/docker info | grep Runtimes
+#
+# Full notes, including why several obvious flags are absent:
+# https://github.com/ivanusto/qnap-comfyui-qpkg/blob/main/docs/HARDWARE-NOTES.md
+# ---------------------------------------------------------------------------
+
+services:
+  comfyui:
+    build:
+      # The Dockerfile is embedded below, and it copies nothing from the build
+      # context, so this only has to be a directory that exists.
+      #
+      # Note that every dollar sign in the embedded Dockerfile is doubled.
+      # Compose substitutes variables across the whole file including this
+      # block, so a single $ would be eaten before Docker ever sees it.
+      context: .
+      args:
+        COMFY_REF: v0.34.3
+        TORCH_INDEX: https://download.pytorch.org/whl/cu128
+        TORCH_VERSION: 2.9.1+cu128
+        TORCHVISION_VERSION: 0.24.1+cu128
+        TORCHAUDIO_VERSION: 2.9.1+cu128
+      dockerfile_inline: |
