@@ -61,8 +61,11 @@ Diagnose with `/proc/buddyinfo`, not `free`. The fix is a reboot, or
 any GPU workload on the machine, not just this package.
 
 Related: on this machine the NVIDIA kernel modules load **345 seconds after
-boot**. Checking earlier than that shows no driver at all. The service script
-waits up to 600 seconds for both the device node and the runtime registration.
+boot**. Checking earlier than that shows no driver at all. Container Station
+can also come up after this package: on one boot the service script found no
+docker binary at all, gave up, and ComfyUI stayed down until started by hand.
+The service script now waits up to 600 seconds for the docker binary, the
+device node and the runtime registration together.
 
 ## 3. GPU passthrough details that are not optional
 

@@ -16,14 +16,18 @@ QPKG_NAME="ComfyUI"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
 
 # Container Station's install path varies by machine. Ask qpkg.conf first, then
-# fall back to scanning /share.
-QCS_DIR=$(/sbin/getcfg container-station Install_Path -f ${CONF})
-if [ -z "$QCS_DIR" ] || [ ! -d "$QCS_DIR" ]; then
-    for d in /share/*/.qpkg/container-station; do
-        [ -x "$d/bin/docker" ] && QCS_DIR="$d" && break
-    done
-fi
-DOCKER="$QCS_DIR/bin/docker"
+# fall back to scanning /share. This runs again inside preflight, because at
+# boot Container Station may not be mounted yet when this package starts.
+resolve_docker() {
+    QCS_DIR=$(/sbin/getcfg container-station Install_Path -f ${CONF})
+    if [ -z "$QCS_DIR" ] || [ ! -x "$QCS_DIR/bin/docker" ]; then
+        for d in /share/*/.qpkg/container-station; do
+            [ -x "$d/bin/docker" ] && QCS_DIR="$d" && break
+        done
+    fi
+    DOCKER="$QCS_DIR/bin/docker"
+}
+resolve_docker
 
 # Rewritten to the real path by pkg_post_install.
 STACK=__STACK_PATH__
@@ -47,24 +51,31 @@ image_name() {
 }
 
 preflight() {
-    [ -x "$DOCKER" ] || { log "docker not found at $DOCKER"; return 1; }
     [ -f "$COMPOSE_FILE" ] || { log "compose file not found: $COMPOSE_FILE"; return 1; }
     [ -f "$STACK/.env" ] || { log ".env missing, install may be incomplete: $STACK/.env"; return 1; }
 
     # The NVIDIA kernel modules can take minutes to load after a reboot (345
-    # seconds on the reference machine) and dockerd comes up later still. Wait
-    # up to 600 seconds; that is far more useful than failing immediately.
+    # seconds on the reference machine) and dockerd comes up later still.
+    # Container Station itself can also start after this package, in which case
+    # its docker binary does not exist yet. Checking for it before the loop made
+    # the service give up at boot and never retry. Wait up to 600 seconds for
+    # all three; that is far more useful than failing immediately.
     RT=$(sed -n 's/^COMFY_GPU_RUNTIME=//p' "$STACK/.env" 2>/dev/null | head -1)
     [ -n "$RT" ] || RT=nvidia-runtime
     i=0
     while [ $i -lt 60 ]; do
-        if [ -c /dev/nvidia0 ] && $DOCKER info 2>/dev/null | grep -q "$RT"; then
-            [ $i -gt 0 ] && log "waited $((i * 10))s for the GPU and docker to come up"
+        [ -x "$DOCKER" ] || resolve_docker
+        if [ -x "$DOCKER" ] && [ -c /dev/nvidia0 ] && $DOCKER info 2>/dev/null | grep -q "$RT"; then
+            [ $i -gt 0 ] && log "waited $((i * 10))s for Container Station, the GPU and docker to come up"
             return 0
         fi
         i=$((i + 1))
         sleep 10
     done
+    if [ ! -x "$DOCKER" ]; then
+        log "timeout: docker not found at $DOCKER, is Container Station running?"
+        return 1
+    fi
     [ -c /dev/nvidia0 ] || log "timeout: /dev/nvidia0 missing, is the NVIDIA GPU Driver package enabled?"
     $DOCKER info 2>/dev/null | grep -q "$RT" || log "timeout: docker has no runtime named '$RT'"
     return 1
