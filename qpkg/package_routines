@@ -6,7 +6,7 @@
 # models-local or custom_nodes directory, and never overwrites a compose file
 # or YAML you have edited.
 
-COMFY_REF="v0.34.3"
+COMFY_REF="v0.35.1"
 
 # /share is a tmpfs. /share/Container and /share/Public are symlinks into
 # <pool>_DATA/<folder>, and the pool name differs per machine: CACHEDEV1_DATA on
@@ -57,6 +57,17 @@ pkg_post_install() {
     PGID=$(awk -F: '$1=="everyone"{print $3}' /etc/group 2>/dev/null)
     [ -n "$PGID" ] || PGID=100
 
+    # From ComfyUI v0.35 on, the container memory limit is read back as the
+    # machine's total RAM and sizes the pinned memory pool. A fixed small value
+    # starves a large NAS, so derive it from physical RAM. Leave 8 GB for QTS
+    # and other containers, and on QuTS hero also the ZFS ARC floor: the ARC is
+    # not counted in MemAvailable, cannot be capped from userland, and under
+    # pressure only shrinks as far as arc_min. Without ZFS the floor is 0.
+    ARC_MIN_KB=$(/sbin/sysctl -n vfs.zfs.arc_min 2>/dev/null | awk '{ print int($1 / 1024) }')
+    [ -n "$ARC_MIN_KB" ] || ARC_MIN_KB=0
+    MEM_LIMIT_GB=$(awk -v arc="$ARC_MIN_KB" '/^MemTotal:/ { g = int(($2 - arc) / 1048576) - 8; if (g < 8) g = 8; print g }' /proc/meminfo 2>/dev/null)
+    [ -n "$MEM_LIMIT_GB" ] || MEM_LIMIT_GB=26
+
     # Everything that varies per machine lives in .env, so compose holds no
     # absolute paths. Never overwrite it: the user's tuning has to survive.
     if [ ! -f "$STACK/.env" ]; then
@@ -82,10 +93,12 @@ pkg_post_install() {
             echo "# GB of VRAM held back from ComfyUI. Raise this if you hit OOM."
             echo "COMFY_RESERVE_VRAM=0.5"
             echo ""
-            echo "# Memory guard rails, not tuning knobs. Set them above the RAM"
-            echo "# you actually have free and leave them alone."
-            echo "COMFY_MEM_LIMIT=26g"
-            echo "COMFY_MEMSWAP_LIMIT=50g"
+            echo "# Memory guard rails. ComfyUI v0.35 and later treat COMFY_MEM_LIMIT"
+            echo "# as total RAM. Install sets physical RAM minus the ZFS ARC floor"
+            echo "# minus 8 GB. Too low makes big models slow; too high makes the"
+            echo "# host swap, because the ARC does not give memory back quickly."
+            echo "COMFY_MEM_LIMIT=${MEM_LIMIT_GB}g"
+            echo "COMFY_MEMSWAP_LIMIT=$((MEM_LIMIT_GB + 24))g"
             echo "COMFY_SHM_SIZE=2gb"
             echo ""
             echo "# The torch wheels must match your driver's CUDA version."

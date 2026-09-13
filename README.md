@@ -5,9 +5,9 @@ App Center package, running on Container Station with an NVIDIA RTX GPU passed
 through.
 
 The package is a thin wrapper around a Docker Compose stack. The image is built
-in place on first start, ComfyUI itself is a bind mount so upgrades do not
-require a rebuild, and your models live on a shared folder that other machines
-can use over SMB or NFS at the same time.
+in place on first start, ComfyUI itself is a bind mount that
+[one command upgrades](#upgrading-comfyui), and your models live on a shared
+folder that other machines can use over SMB or NFS at the same time.
 
 ## Status
 
@@ -15,9 +15,9 @@ Working, but validated on exactly one machine so far. **If you have a QNAP NAS
 with an NVIDIA card, hardware reports are the main thing this project needs.**
 See [Reporting your hardware](#reporting-your-hardware).
 
-| NAS | CPU | GPU | Driver / CUDA | QTS | Result |
-| --- | --- | --- | --- | --- | --- |
-| TS-855X | Atom C5125 (no AVX) | RTX A2000 12GB (sm_86) | 575.64.05 / 12.9 | 6.0.2 | Works |
+| NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| TS-855X | Atom C5125 (no AVX) | RTX A2000 12GB (sm_86) | 575.64.05 / 12.9 | 6.0.2 | v0.34.3, v0.35.1 | Works |
 
 QNAP ships very different CPUs across its range, from Annapurna ARM parts to
 Atom, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
@@ -122,10 +122,65 @@ All of `.env` takes effect on package restart.
 | `COMFY_PORT` | `8188` | Host port |
 | `COMFY_GPU_RUNTIME` | `nvidia-runtime` | Verify with `docker info \| grep Runtimes` |
 | `COMFY_RESERVE_VRAM` | `0.5` | GB held back from ComfyUI. Raise if you hit OOM |
-| `COMFY_MEM_LIMIT` | `26g` | A guard rail, not a tuning knob. See notes |
+| `COMFY_MEM_LIMIT` | RAM minus ZFS ARC floor minus 8 GB | From v0.35 ComfyUI treats this as total RAM. Too low makes big models slow, too high makes QuTS hero swap |
 | `COMFY_MODELS_SHARED` | `<Public>/models` | Read-only model root |
 | `PUID` / `PGID` | resolved at install | Ownership of generated files |
 | `TORCH_*` | cu128 set | Must match your driver |
+
+## Upgrading ComfyUI
+
+Reinstalling the package does **not** change the ComfyUI version, because
+`.env` is never overwritten. Upgrade from an SSH session instead:
+
+```sh
+QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
+sh $QPKG/ComfyUI.sh upgrade v0.35.1
+```
+
+Pick the tag from the upstream
+[releases](https://github.com/comfyanonymous/ComfyUI/releases). The command:
+
+1. Downloads the new source next to the current one.
+2. Builds a new image, tagged with the new version, while the running version
+   keeps serving. This takes 15 to 30 minutes, because the Python dependencies
+   change between releases.
+3. Stops the container, swaps the source tree, updates `COMFY_REF` in `.env`
+   and starts again, then waits for ComfyUI to answer.
+4. If the new version does not come up, it swaps back and starts the old one.
+
+A failed download or build changes nothing. Progress goes to
+`<Container>/comfyui/logs/qpkg.log`. The session has to stay open for the whole
+build; if yours might drop, run it detached:
+
+```sh
+setsid sh $QPKG/ComfyUI.sh upgrade v0.35.1 > /dev/null 2>&1 < /dev/null &
+```
+
+The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
+going back is quick and needs no rebuild:
+
+```sh
+sh $QPKG/ComfyUI.sh rollback
+```
+
+Once you are happy with the new version, reclaim the space:
+
+```sh
+rm -rf <Container>/comfyui/ComfyUI.prev-v0.34.3
+docker rmi comfyui-nas:v0.34.3
+```
+
+Your `output`, `user`, `models-local` and `custom_nodes` are separate
+directories and are never touched. Custom nodes can still break on a new
+ComfyUI release, so check theirs before upgrading.
+
+**Coming from v0.34.x:** raise `COMFY_MEM_LIMIT` in `.env` first. Older
+installs wrote `26g`, and from v0.35 on ComfyUI reads that back as the total RAM.
+On a 64 GB NAS it cuts the pinned memory pool from about 56 GB to about 10 GB.
+A sensible value is physical RAM minus 8 GB, and on QuTS hero minus the ZFS ARC
+floor as well (`sysctl -n vfs.zfs.arc_min`), with `COMFY_MEMSWAP_LIMIT` 24 GB
+above it. Do not simply remove the limit on QuTS hero: the ARC can hold most of
+the RAM without showing up in `MemAvailable`, and the host starts swapping.
 
 ## Reporting your hardware
 
@@ -136,7 +191,7 @@ version, and whether it worked. Failures are more useful than successes.
 
 ## Known behaviour worth reading before you file a bug
 
-Four things bite people, and all four look like something else. They are
+Five things bite people, and all five look like something else. They are
 documented with evidence in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md):
 
 - CPUs without AVX2 crash on import with `Illegal instruction`, in a file that
@@ -147,6 +202,8 @@ documented with evidence in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md):
   variables are mandatory, not optional.
 - A larger model showing *lower* peak VRAM means it is being streamed, not that
   it is more efficient.
+- From ComfyUI v0.35 the container memory limit becomes the RAM ComfyUI plans
+  with, so an old, low limit quietly makes large models slower.
 
 ## License
 

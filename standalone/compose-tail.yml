@@ -1,4 +1,4 @@
-    image: comfyui-standalone:v0.34.3
+    image: comfyui-standalone:v0.35.1
     container_name: comfyui
     restart: unless-stopped
 
@@ -24,13 +24,17 @@
     # would rather not run as root, remembering to chown the directories below.
     user: "0:100"
 
-    # A guard rail, not a tuning knob. cgroup counts mmap page cache against
-    # this, but that memory is reclaimable, so exceeding the limit triggers
-    # reclaim rather than an OOM kill. Setting it too low is actively harmful:
-    # it evicts the model's page cache and sends every sampling step back to
-    # disk. Put it above the RAM you actually have free.
-    mem_limit: 26g
-    memswap_limit: 50g
+    # cgroup counts mmap page cache against this, but that memory is
+    # reclaimable, so exceeding the limit triggers reclaim rather than an OOM
+    # kill. From ComfyUI v0.35 on it is also read back as the total RAM, which
+    # sizes the pinned memory pool. Setting it too low is actively harmful: big
+    # models get less pinned memory and their page cache is evicted back to
+    # disk. Set it to your NAS RAM minus about 8 GB, and memswap_limit 24 GB
+    # above that. On QuTS hero also subtract the ZFS ARC floor, read with
+    # "sysctl -n vfs.zfs.arc_min", or the host swaps. The values below suit a
+    # 32 GB QTS NAS.
+    mem_limit: 24g
+    memswap_limit: 48g
     shm_size: 2gb
 
     # If this NAS runs watchtower, it updates every container by default.

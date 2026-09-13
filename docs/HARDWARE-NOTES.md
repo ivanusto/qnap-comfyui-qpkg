@@ -6,7 +6,8 @@ help you tell which findings should generalise and which should not.
 
 Reference machine: QNAP TS-855X, Intel Atom C5125 (8 cores), 62.5 GB RAM,
 NVIDIA RTX A2000 12GB (GA106, sm_86, 70 W), driver 575.64.05 / CUDA 12.9,
-QTS 6.0.2, Container Station 3.1.2, storage on a tiered ZFS pool.
+QTS 6.0.2, Container Station 3.1.2 (3.1.4 from ComfyUI v0.35.1 on), storage on
+a tiered ZFS pool.
 
 ## 1. CPUs without AVX2 crash, and the traceback points at the wrong file
 
@@ -263,3 +264,86 @@ the container then fails to start. Every mount in the standalone compose is
 therefore a directory, and `extra_model_paths.yaml` is seeded into a mounted
 `/config` directory by the entrypoint on first run instead of being mounted
 directly.
+
+## 11. From v0.35 the container memory limit becomes the RAM ComfyUI plans with
+
+Up to v0.34, `mem_limit` in compose was only a guard rail: ComfyUI sized
+everything from the host's RAM through `psutil`, and cgroup reclaim kept page
+cache in check. ComfyUI v0.35.0 (upstream PR #15927) reads the cgroup limit
+instead, for both cgroup v1 (`memory.limit_in_bytes`) and v2 (`memory.max`),
+and treats it as total RAM. Available RAM becomes the limit minus the cgroup's
+working set, and swap is ignored for the pinned memory pool once a limit exists.
+
+The pinned memory ceiling on Linux is
+
+```
+max(0.40 x RAM, min(0.90 x RAM, RAM - 4 GB, RAM + swap - 16 GB))
+```
+
+On the reference machine (62.5 GB RAM, 61 GB swap) that works out as follows:
+
+| `mem_limit` | RAM ComfyUI sees | Pinned memory ceiling |
+| --- | --- | --- |
+| none, or v0.34 | 62.5 GB | about 56 GB |
+| `56g` | 56 GB | 40 GB, measured |
+| `42g` (what install now writes here) | 42 GB | about 26 GB |
+| `40g` (what the reference machine runs) | 40 GB | 24 GB, measured |
+| `26g` (the old default) | 26 GB | about 10 GB |
+
+Qwen-Image 2512 fp8 on the 12 GB card dropped host `MemAvailable` from 55 GB to
+6.4 GB, so its weights stream from RAM, not VRAM. A 10 GB pool pushes most of
+that back to disk. Check what your container ended up with in the startup log.
+The reference machine with `mem_limit: 40g` shows:
+
+```
+RAM limited by cgroup to 40960 MB (host has 63985 MB)
+Enabled pinned memory 24576
+```
+
+### Higher is not better on QuTS hero
+
+The obvious fix, a limit close to physical RAM, backfires on QuTS hero. The ZFS
+ARC lives outside the page cache, so it appears in neither `Cached` nor
+`MemAvailable`. On the reference machine after a day of uptime:
+
+| | Value |
+| --- | --- |
+| `kstat.zfs.misc.arcstats.size` | 46.7 GB |
+| `vfs.zfs.arc_max` | 50.2 GB |
+| `vfs.zfs.arc_min` | 12.5 GB |
+| `MemAvailable` | 5 to 8 GB |
+| Container working set | about 9 GB, far below its 56 GB limit |
+
+The ARC does shrink under pressure, but not fast enough for a model load. The
+host swapped heavily, 96% of compaction attempts failed, and physical memory
+fragmented to the state described in section 2. In that state a Krea 2 Turbo
+job with one LoRA took 357 seconds.
+
+After a reboot, with `mem_limit: 40g`, the same Krea 2 Turbo nvfp4 workflow
+(1024x1024, 8 steps, one LoRA) measured:
+
+| Run | Time | Note |
+| --- | --- | --- |
+| First run after boot | 197 s | ARC empty, weights read from disk. ARC grew from 18 to 34 GB |
+| Models unloaded, files still in ARC | 66 s | Close to the 70 s measured on v0.34.3 |
+| Models loaded, new seed | 50 s | Peak VRAM 8949 MiB, no swap used |
+
+So on this machine the first job after a reboot is disk bound, and ComfyUI
+v0.35.1 itself is not slower than v0.34.3.
+
+The ARC cannot be capped from userland. `vfs.zfs.arc_max` and `arc_min` are
+read-only in both `/proc/sys/vfs/zfs` and `/sys/module/zfs/parameters`, even for
+root; `zfs.ko` is loaded without parameters by QTS's own init script; and the
+root file system is a RAM disk, so boot-time changes do not persist. Note too
+that `/sbin/sysctl` is BusyBox, which needs `-w` to write and otherwise reports
+`key=value` as an unknown key.
+
+So the ARC floor has to come out of the limit instead. Install now writes
+physical RAM minus `vfs.zfs.arc_min` minus 8 GB, which is 42g on the reference
+machine (0 for the ARC on QTS). The reference machine runs 40g because it only
+serves mid-size models such as Krea 2 and Flux, whose weights fit in the 24 GB
+pinned pool. Rebooting before long runs also resets both the ARC and
+fragmentation.
+
+Installs made before v0.35.1 keep their `.env`, so set the value by hand before
+upgrading.

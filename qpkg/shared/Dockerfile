@@ -6,7 +6,7 @@
 # waste. The driver side libcuda.so.1 is injected at runtime by nvidia-runtime.
 FROM python:3.12-slim-bookworm
 
-ARG COMFY_REF=v0.34.3
+ARG COMFY_REF=v0.35.1
 # The torch wheel index has to match the driver shipped by the NVIDIA_GPU_DRV
 # package. Read the CUDA version out of nvidia-smi and pick wheels no newer
 # than that. There is a table in the README.
