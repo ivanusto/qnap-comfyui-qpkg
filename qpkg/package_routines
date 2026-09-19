@@ -25,6 +25,10 @@ resolve_share() {
 }
 
 pkg_post_install() {
+    # qbuild keeps the builder's uid (1001 on GitHub runners, the
+    # developer's own on a workstation). On a NAS that uid can belong to a
+    # real user, who could then edit scripts that QTS runs as root.
+    chown -R 0:0 "${SYS_QPKG_DIR}"
     STACK="$(resolve_share Container)/comfyui"
     PUBLIC="$(resolve_share Public)"
     MODELS_SHARED="$PUBLIC/models"
