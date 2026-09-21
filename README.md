@@ -177,6 +177,29 @@ for reasons unrelated to the version (see section 2 of
 `grep Normal /proc/buddyinfo` shows zeros in the last two columns, reboot
 first.
 
+**Known issue in v0.37.0:** any node that generates text with a Qwen text
+encoder, such as `TextGenerate` for prompt expansion in the Krea 2 workflow,
+fails with `CUDA error: CUDA driver version is insufficient for CUDA runtime
+version`. Image generation alone is not affected. ComfyUI disables the
+comfy-kitchen CUDA backend on PyTorch builds older than cu130, which is what
+this package installs, but the new decode path in
+`comfy/text_encoders/llama.py` uses the backend anyway. Until upstream fixes
+it, change line 882 of `<Container>/comfyui/ComfyUI/comfy/text_encoders/llama.py`
+from
+
+```python
+        flash_kv = self.fixed_kv and flash is not None and flash(device)
+```
+
+to
+
+```python
+        flash_kv = self.fixed_kv and flash is not None and flash(device) and torch.version.cuda is not None and int(str(torch.version.cuda).split(".")[0]) >= 13
+```
+
+and restart the package. Text generation then takes the same path as in
+v0.36.0. The next `upgrade` replaces the file with upstream's version.
+
 **Going from v0.36.0 to v0.37.0:** no database migration, so rolling back is
 a plain directory swap. v0.37.0 can turn on fast disk by itself, but not on
 ZFS; check for `fast_disk=False` in the log. See section 6 of
