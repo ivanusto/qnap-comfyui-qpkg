@@ -17,10 +17,10 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| TS-855X | Atom C5125 (no AVX) | RTX A2000 12GB (sm_86) | 575.64.05 / 12.9 | 6.0.2 | v0.34.3, v0.35.1 | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3, v0.35.1 | Works |
 
 QNAP ships very different CPUs across its range, from Annapurna ARM parts to
-Atom, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
+low-power Intel parts, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
 package behave the same way underneath, so this should port, but the CPU
 instruction set and the storage pool naming both differ enough to break naive
 assumptions. Both are handled explicitly here. See

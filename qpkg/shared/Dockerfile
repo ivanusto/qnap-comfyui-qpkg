@@ -52,7 +52,7 @@ RUN grep -vE '^(torch|torchvision|torchaudio)([=<>!~[]|$)' /tmp/requirements.txt
     && pip install --no-cache-dir -r /tmp/req-notorch.txt \
     && python -c "import comfy_aimdo.control, comfy_kitchen; print('aimdo/kitchen import OK')"
 
-# CPUs without AVX2 (Atom C5125 and other Tremont parts stop at sse4_2) cannot
+# CPUs without AVX2 (some low-power parts stop at sse4_2) cannot
 # execute the kornia_rs wheels from 0.1.13 onward. The failure is
 #   Fatal Python error: Illegal instruction
 # reported against comfy_extras/nodes_post_processing.py, which merely imports

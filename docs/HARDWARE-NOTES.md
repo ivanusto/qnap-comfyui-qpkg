@@ -4,14 +4,14 @@ Everything here was measured on a real machine, not inferred. Where a number
 comes from one specific NAS it says so, because the point of this document is to
 help you tell which findings should generalise and which should not.
 
-Reference machine: QNAP TS-855X, Intel Atom C5125 (8 cores), 62.5 GB RAM,
-NVIDIA RTX A2000 12GB (GA106, sm_86, 70 W), driver 575.64.05 / CUDA 12.9,
+Reference machine: a QNAP NAS with an 8-core x86 CPU without AVX, 62.5 GB RAM,
+and a 12 GB NVIDIA card (sm_86, 70 W), driver 575.64.05 / CUDA 12.9,
 QTS 6.0.2, Container Station 3.1.2 (3.1.4 from ComfyUI v0.35.1 on), storage on
 a tiered ZFS pool.
 
 ## 1. CPUs without AVX2 crash, and the traceback points at the wrong file
 
-The Atom C5125 is a Tremont core. Its `/proc/cpuinfo` flags stop at `sse4_2`:
+The reference machine's CPU is a low-power x86 part whose `/proc/cpuinfo` flags stop at `sse4_2`:
 no AVX at all, let alone AVX2. The `kornia_rs` wheels from 0.1.13 onward contain
 instructions it cannot execute.
 
@@ -96,7 +96,7 @@ do not copy that configuration.
 
 ## 4. Fitting in VRAM beats native quantized kernels
 
-Measured on the A2000 12GB with a 12.9B parameter model, 1024x1024, 8 steps,
+Measured on the 12 GB sm_86 card with a 12.9B parameter model, 1024x1024, 8 steps,
 same seed:
 
 | Weight format | File size | Cold | Warm | Peak VRAM | Kernels |

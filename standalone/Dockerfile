@@ -63,8 +63,8 @@ RUN grep -vE '^(torch|torchvision|torchaudio)([=<>!~[]|$)' /opt/ComfyUI/requirem
     && pip install --no-cache-dir -r /tmp/req.txt \
     && python -c "import comfy_aimdo.control, comfy_kitchen; print('aimdo/kitchen import OK')"
 
-# kornia_rs 0.1.13 and newer will not run on CPUs without AVX2, such as the Atom
-# parts QNAP uses in several models. The failure is a fatal Illegal instruction
+# kornia_rs 0.1.13 and newer will not run on CPUs without AVX2, such as the
+# low-power parts QNAP uses in several models. The failure is a fatal Illegal instruction
 # reported against an unrelated file, with no warning from pip.
 RUN pip install --no-cache-dir "kornia_rs==0.1.10" \
     && python -c "import kornia, kornia_rs; print('kornia', kornia.__version__, 'with kornia_rs', kornia_rs.__version__, 'OK')"
