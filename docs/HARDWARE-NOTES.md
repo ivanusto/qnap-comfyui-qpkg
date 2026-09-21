@@ -179,6 +179,19 @@ A bare import is not enough; the extra paths only exist after
 | `--fast-disk` | Streams weights from disk every step. Cold reads on the reference machine measured 145.9 MB/s against 4.9 GB/s warm |
 | `--supports-fp8-compute` | Claims a capability sm_86 does not have |
 
+From v0.37.0 ComfyUI turns fast disk on by itself when every file of a model
+sits on a physical NVMe device linked at PCIe Gen3 x4 or better. It finds the
+device through the file's `st_dev` and `/sys/dev/block`. ZFS datasets have
+anonymous device numbers (`0:35` for the shared model folder here) with no
+entry there, so detection returns unknown and fast disk stays off. The startup
+log confirms it per model: `Model storage policy: fast_disk=False`. If a
+different storage layout ever turns it on, `--disable-fast-disk` overrides it.
+
+v0.37.0 also keeps the text encoder on the GPU whenever DynamicVRAM is on. With
+Krea 2 Turbo nvfp4, one LoRA, 1024x1024 and 8 steps, `nvidia-smi` peaked at
+11205 MiB of 11904 on the first run and 9929 MiB warm, without an OOM. The warm
+run took 50.7 s, the same as on v0.35.1.
+
 `comfy-aimdo` and `comfy-kitchen` are upstream dependencies, not optional
 extras. `comfy-aimdo` implements DynamicVRAM and is what makes models larger
 than VRAM work at all. Do not strip them from `requirements.txt`.

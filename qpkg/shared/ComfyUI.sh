@@ -14,7 +14,7 @@
 CONF=/etc/config/qpkg.conf
 QPKG_NAME="ComfyUI"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
-DEFAULT_REF=v0.36.0
+DEFAULT_REF=v0.37.0
 
 # Container Station's install path varies by machine. Ask qpkg.conf first, then
 # fall back to scanning /share. This runs again inside preflight, because at

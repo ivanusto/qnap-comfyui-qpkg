@@ -17,7 +17,7 @@
 #     Docker create a directory in its place and the container then fails.
 FROM python:3.12-slim-bookworm
 
-ARG COMFY_REF=v0.36.0
+ARG COMFY_REF=v0.37.0
 # These must match the CUDA version your NVIDIA driver reports. Check with
 # nvidia-smi and see the table in the project README.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cu128

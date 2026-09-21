@@ -17,7 +17,7 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3, v0.35.1, v0.36.0 | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.37.0 | Works |
 
 QNAP ships very different CPUs across its range, from Annapurna ARM parts to
 low-power Intel parts, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
@@ -134,7 +134,7 @@ Reinstalling the package does **not** change the ComfyUI version, because
 
 ```sh
 QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
-sh $QPKG/ComfyUI.sh upgrade v0.36.0
+sh $QPKG/ComfyUI.sh upgrade v0.37.0
 ```
 
 Pick the tag from the upstream
@@ -153,7 +153,7 @@ A failed download or build changes nothing. Progress goes to
 build; if yours might drop, run it detached:
 
 ```sh
-setsid sh $QPKG/ComfyUI.sh upgrade v0.36.0 > /dev/null 2>&1 < /dev/null &
+setsid sh $QPKG/ComfyUI.sh upgrade v0.37.0 > /dev/null 2>&1 < /dev/null &
 ```
 
 The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
@@ -176,6 +176,11 @@ for reasons unrelated to the version (see section 2 of
 [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md)). If
 `grep Normal /proc/buddyinfo` shows zeros in the last two columns, reboot
 first.
+
+**Going from v0.36.0 to v0.37.0:** no database migration, so rolling back is
+a plain directory swap. v0.37.0 can turn on fast disk by itself, but not on
+ZFS; check for `fast_disk=False` in the log. See section 6 of
+[docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
 **Going from v0.35.x to v0.36.0:** upstream migration
 `0007_record_content_split` rebuilds the asset database in `user/comfyui.db`
