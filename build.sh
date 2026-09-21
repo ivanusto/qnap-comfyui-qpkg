@@ -10,7 +10,7 @@
 set -e
 
 ARCH="${ARCH:-x86_64}"
-VERSION="${VERSION:-0.35.1}"
+VERSION="${VERSION:-0.36.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 
 QBUILD=$(command -v qbuild 2>/dev/null || true)
@@ -38,6 +38,9 @@ cd "$WORK"
 
 mkdir -p "$SRC/build"
 cp "$WORK/build/"*.qpkg "$WORK/build/"*.qpkg.md5 "$SRC/build/" 2>/dev/null || true
+# qbuild writes the checksum as "<md5>  build/<file>", which md5sum -c cannot
+# find next to a downloaded file. Drop the directory prefix.
+sed -i 's#  build/#  #' "$SRC/build/"*.qpkg.md5 2>/dev/null || true
 echo
 echo "Built:"
 ls -la "$SRC/build/"

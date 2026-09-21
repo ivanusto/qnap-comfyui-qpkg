@@ -6,7 +6,7 @@
 # models-local or custom_nodes directory, and never overwrites a compose file
 # or YAML you have edited.
 
-COMFY_REF="v0.35.1"
+COMFY_REF="v0.36.0"
 
 # /share is a tmpfs. /share/Container and /share/Public are symlinks into
 # <pool>_DATA/<folder>, and the pool name differs per machine: CACHEDEV1_DATA on

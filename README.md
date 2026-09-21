@@ -17,7 +17,7 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3, v0.35.1 | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3, v0.35.1, v0.36.0 | Works |
 
 QNAP ships very different CPUs across its range, from Annapurna ARM parts to
 low-power Intel parts, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
@@ -134,11 +134,11 @@ Reinstalling the package does **not** change the ComfyUI version, because
 
 ```sh
 QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
-sh $QPKG/ComfyUI.sh upgrade v0.35.1
+sh $QPKG/ComfyUI.sh upgrade v0.36.0
 ```
 
 Pick the tag from the upstream
-[releases](https://github.com/comfyanonymous/ComfyUI/releases). The command:
+[releases](https://github.com/Comfy-Org/ComfyUI/releases). The command:
 
 1. Downloads the new source next to the current one.
 2. Builds a new image, tagged with the new version, while the running version
@@ -153,7 +153,7 @@ A failed download or build changes nothing. Progress goes to
 build; if yours might drop, run it detached:
 
 ```sh
-setsid sh $QPKG/ComfyUI.sh upgrade v0.35.1 > /dev/null 2>&1 < /dev/null &
+setsid sh $QPKG/ComfyUI.sh upgrade v0.36.0 > /dev/null 2>&1 < /dev/null &
 ```
 
 The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
@@ -169,6 +169,25 @@ Once you are happy with the new version, reclaim the space:
 rm -rf <Container>/comfyui/ComfyUI.prev-v0.34.3
 docker rmi comfyui-nas:v0.34.3
 ```
+
+Check the host before upgrading. Every upgrade and rollback restarts the
+container, and after days of uptime the GPU can fail to initialise on restart
+for reasons unrelated to the version (see section 2 of
+[docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md)). If
+`grep Normal /proc/buddyinfo` shows zeros in the last two columns, reboot
+first.
+
+**Going from v0.35.x to v0.36.0:** upstream migration
+`0007_record_content_split` rebuilds the asset database in `user/comfyui.db`
+from scratch. ComfyUI keeps the old file as `user/comfyui.db.bkp`. This package
+does not enable `--enable-assets`, so nothing visible is lost, but copy
+`comfyui.db` somewhere safe first if you use the assets feature yourself.
+
+Rolling back to v0.35.x afterwards still works. The older release does not know
+the new database revision, logs `Error upgrading database ... Can't locate
+revision identified by '0007_record_content_split'` and starts anyway, because
+the database is optional without `--enable-assets`. Measured on the reference
+machine: rollback 92 s, upgrading again 50 s, neither rebuilding anything.
 
 Your `output`, `user`, `models-local` and `custom_nodes` are separate
 directories and are never touched. Custom nodes can still break on a new

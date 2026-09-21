@@ -57,6 +57,21 @@ allocation failure was at 50107 seconds, so roughly the first 14 hours were
 healthy. After a reboot, order-10 blocks went from 0 to 14261 and CUDA worked
 immediately.
 
+It happened again after 8 days of uptime, during an upgrade. The running
+container had been fine; the failure appeared when the upgrade restarted it,
+and a rollback to the previous version failed the same way. At that point the
+Normal zone had no free order-10 blocks and only two at order 9, with 11 GB
+free. So a restart is the trigger, and an upgrade or rollback that fails its
+readiness check may be telling you about the host rather than the release.
+
+Reclaiming memory without a reboot did not fix it. Writing
+`vm.compact_memory` alone left orders 8 to 10 at zero. Dropping caches first
+(`echo 3 > /proc/sys/vm/drop_caches`) freed a single order-8 block, which only
+made the failure intermittent: the entrypoint's CUDA check sometimes passed and
+ComfyUI then crashed on its own CUDA initialisation a few seconds later. After
+a reboot the Normal zone had 6507 free order-10 blocks and the same image
+started cleanly.
+
 Diagnose with `/proc/buddyinfo`, not `free`. The fix is a reboot, or
 `vm.compact_memory` if you have root. This is a host condition and will affect
 any GPU workload on the machine, not just this package.
