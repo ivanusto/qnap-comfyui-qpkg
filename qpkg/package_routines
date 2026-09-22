@@ -52,6 +52,11 @@ pkg_post_install() {
     done
     /bin/chmod +x "$STACK/entrypoint.sh"
 
+    # The one file the package owns inside custom_nodes, so it is always
+    # replaced. It keeps comfy-kitchen's flash decode off on PyTorch builds
+    # older than CUDA 13; see the header of the file.
+    /bin/cp "$SYS_QPKG_DIR/qnap_cu12_guard.py" "$STACK/custom_nodes/qnap_cu12_guard.py"
+
     # Run as admin and the everyone group. That is the QNAP convention and it
     # guarantees write access to whichever shared folder the user picks.
     # Note that "everyone" is a GROUP, not a user, so id -g everyone always

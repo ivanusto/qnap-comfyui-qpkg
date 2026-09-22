@@ -177,28 +177,25 @@ for reasons unrelated to the version (see section 2 of
 `grep Normal /proc/buddyinfo` shows zeros in the last two columns, reboot
 first.
 
-**Known issue in v0.37.0:** any node that generates text with a Qwen text
-encoder, such as `TextGenerate` for prompt expansion in the Krea 2 workflow,
-fails with `CUDA error: CUDA driver version is insufficient for CUDA runtime
-version`. Image generation alone is not affected. ComfyUI disables the
-comfy-kitchen CUDA backend on PyTorch builds older than cu130, which is what
-this package installs, but the new decode path in
-`comfy/text_encoders/llama.py` uses the backend anyway. Until upstream fixes
-it, change line 882 of `<Container>/comfyui/ComfyUI/comfy/text_encoders/llama.py`
-from
+**CUDA 12 and v0.37.0 text generation:** from v0.37.0, nodes that generate
+text with a Qwen text encoder, such as `TextGenerate` for prompt expansion in
+the Krea 2 workflow, fail on PyTorch builds older than cu130 with `CUDA error:
+CUDA driver version is insufficient for CUDA runtime version`. ComfyUI
+disables the comfy-kitchen CUDA backend below cu130, but the new decode path
+in `comfy/text_encoders/llama.py` uses it anyway. Upstream supports CUDA 12
+only on GPUs that cannot run CUDA 13
+([#16449](https://github.com/Comfy-Org/ComfyUI/issues/16449)), and QNAP's
+NVIDIA GPU Driver package stops at 575 (CUDA 12.9), so this package stays on
+cu128.
 
-```python
-        flash_kv = self.fixed_kv and flash is not None and flash(device)
-```
-
-to
-
-```python
-        flash_kv = self.fixed_kv and flash is not None and flash(device) and torch.version.cuda is not None and int(str(torch.version.cuda).split(".")[0]) >= 13
-```
-
-and restart the package. Text generation then takes the same path as in
-v0.36.0. The next `upgrade` replaces the file with upstream's version.
+From v0.37.0-2 the package installs `custom_nodes/qnap_cu12_guard.py`, which
+turns that decode path off at startup when PyTorch is older than cu130 and does
+nothing otherwise. Look for `qnap_cu12_guard: PyTorch built for CUDA 12.8` in
+the startup log. It does not edit any upstream file, so it survives
+`upgrade`. If you applied the one-line change to `llama.py` suggested for
+v0.37.0-1, you can leave it or undo it; the next `upgrade` replaces that file
+anyway. The standalone compose file does not install the guard, so copy
+`qpkg/shared/qnap_cu12_guard.py` into its `custom_nodes` yourself.
 
 **Going from v0.36.0 to v0.37.0:** no database migration, so rolling back is
 a plain directory swap. v0.37.0 can turn on fast disk by itself, but not on
