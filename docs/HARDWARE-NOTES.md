@@ -192,6 +192,10 @@ Krea 2 Turbo nvfp4, one LoRA, 1024x1024 and 8 steps, `nvidia-smi` peaked at
 11205 MiB of 11904 on the first run and 9929 MiB warm, without an OOM. The warm
 run took 50.7 s, the same as on v0.35.1.
 
+v0.38.0 runs the same fast disk detection in every model loader. On ZFS the
+result does not change: the Krea 2 diffusion model, text encoder and VAE all
+log `fast_disk=False`.
+
 This machine is stuck on CUDA 12. QNAP's NVIDIA GPU Driver 6.2.2, the newest
 package available, ships driver 575.64.05, which reports CUDA 12.9, so PyTorch
 has to be a cu128 build. ComfyUI disables comfy-kitchen's optimized CUDA ops
@@ -200,7 +204,8 @@ startup; they stay unused here. Upstream supports CUDA 12 only on GPUs that
 cannot run CUDA 13, and an sm_86 card can, so paths that assume cu130 are not
 treated as bugs ([#16449](https://github.com/Comfy-Org/ComfyUI/issues/16449)).
 v0.37.0's Qwen text generation was the first such path; the package's
-`qnap_cu12_guard.py` custom node covers it.
+`qnap_cu12_guard.py` custom node covers it, including the second call site
+added in v0.38.0.
 
 `comfy-aimdo` and `comfy-kitchen` are upstream dependencies, not optional
 extras. `comfy-aimdo` implements DynamicVRAM and is what makes models larger

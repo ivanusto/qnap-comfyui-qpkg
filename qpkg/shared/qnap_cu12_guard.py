@@ -11,8 +11,9 @@ QNAP's NVIDIA GPU Driver package stops, that fails with
   CUDA error: CUDA driver version is insufficient for CUDA runtime version
 Upstream supports CUDA 12 only on GPUs that cannot run CUDA 13, so the guard
 lives here. llama.py looks the function up at call time, so replacing it at
-startup is enough and no upstream file is edited. On a cu130 build this file
-does nothing.
+startup is enough and no upstream file is edited. v0.38.0 adds a second call
+site (FixedKV attention) that also looks the function up at call time, so the
+same replacement covers it. On a cu130 build this file does nothing.
 """
 import logging
 

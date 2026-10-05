@@ -17,7 +17,7 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.37.0 | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.38.0 | Works |
 
 QNAP ships very different CPUs across its range, from Annapurna ARM parts to
 low-power Intel parts, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
@@ -134,7 +134,7 @@ Reinstalling the package does **not** change the ComfyUI version, because
 
 ```sh
 QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
-sh $QPKG/ComfyUI.sh upgrade v0.37.0
+sh $QPKG/ComfyUI.sh upgrade v0.38.0
 ```
 
 Pick the tag from the upstream
@@ -153,7 +153,7 @@ A failed download or build changes nothing. Progress goes to
 build; if yours might drop, run it detached:
 
 ```sh
-setsid sh $QPKG/ComfyUI.sh upgrade v0.37.0 > /dev/null 2>&1 < /dev/null &
+setsid sh $QPKG/ComfyUI.sh upgrade v0.38.0 > /dev/null 2>&1 < /dev/null &
 ```
 
 The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
@@ -196,6 +196,14 @@ the startup log. It does not edit any upstream file, so it survives
 v0.37.0-1, you can leave it or undo it; the next `upgrade` replaces that file
 anyway. The standalone compose file does not install the guard, so copy
 `qpkg/shared/qnap_cu12_guard.py` into its `custom_nodes` yourself.
+
+**Going from v0.37.0 to v0.38.0:** upstream migration `0008_drop_asset_meta`
+drops an unused table and has a downgrade, so `rollback` works. The Python
+dependencies barely move (comfy-kitchen 0.2.36, a newer frontend). Upstream no
+longer lists `torchaudio`; the image keeps installing it so custom nodes that
+import it still load. The CUDA 12 guard covers the extra flash decode call
+site that v0.38.0 adds, and `TextGenerate` workflows saved on v0.37.0 run
+unchanged; its new `system_prompt` input is optional.
 
 **Going from v0.36.0 to v0.37.0:** no database migration, so rolling back is
 a plain directory swap. v0.37.0 can turn on fast disk by itself, but not on
