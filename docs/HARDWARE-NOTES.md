@@ -196,6 +196,13 @@ v0.38.0 runs the same fast disk detection in every model loader. On ZFS the
 result does not change: the Krea 2 diffusion model, text encoder and VAE all
 log `fast_disk=False`.
 
+v0.39.0 changes neither: all three loaders still log `fast_disk=False`, and the
+Krea 2 workflow with prompt expansion runs on cu128 through the guard. Run back
+to back on the same boot, with the GPU capped at 50 W and host memory already
+fragmented, v0.38.0 and v0.39.0 took the same time warm (78 to 80 s against 77
+to 80 s), so absolute numbers on a long-running box say more about its state
+than about the ComfyUI version.
+
 This machine is stuck on CUDA 12. QNAP's NVIDIA GPU Driver 6.2.2, the newest
 package available, ships driver 575.64.05, which reports CUDA 12.9, so PyTorch
 has to be a cu128 build. ComfyUI disables comfy-kitchen's optimized CUDA ops

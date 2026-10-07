@@ -17,7 +17,7 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.38.0 | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.39.0 | Works |
 
 QNAP ships very different CPUs across its range, from Annapurna ARM parts to
 low-power Intel parts, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
@@ -134,7 +134,7 @@ Reinstalling the package does **not** change the ComfyUI version, because
 
 ```sh
 QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
-sh $QPKG/ComfyUI.sh upgrade v0.38.0
+sh $QPKG/ComfyUI.sh upgrade v0.39.0
 ```
 
 Pick the tag from the upstream
@@ -153,7 +153,7 @@ A failed download or build changes nothing. Progress goes to
 build; if yours might drop, run it detached:
 
 ```sh
-setsid sh $QPKG/ComfyUI.sh upgrade v0.38.0 > /dev/null 2>&1 < /dev/null &
+setsid sh $QPKG/ComfyUI.sh upgrade v0.39.0 > /dev/null 2>&1 < /dev/null &
 ```
 
 The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
@@ -196,6 +196,14 @@ the startup log. It does not edit any upstream file, so it survives
 v0.37.0-1, you can leave it or undo it; the next `upgrade` replaces that file
 anyway. The standalone compose file does not install the guard, so copy
 `qpkg/shared/qnap_cu12_guard.py` into its `custom_nodes` yourself.
+
+**Going from v0.38.0 to v0.39.0:** no new database migration, so `rollback`
+works. The Python dependencies barely move (comfy-kitchen 0.2.37, frontend
+1.53.10). `llama.py` is unchanged, so the CUDA 12 guard needs nothing new.
+Upstream turns `--disable-api-nodes` into a deprecated alias of the new
+`--offline` flag, which also stops the frontend from reaching the internet;
+use `--disable-partner-nodes` if you only want the paid API nodes gone. The
+package does not pass either flag by default.
 
 **Going from v0.37.0 to v0.38.0:** upstream migration `0008_drop_asset_meta`
 drops an unused table and has a downgrade, so `rollback` works. The Python
