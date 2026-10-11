@@ -15,8 +15,15 @@ ARG TORCH_VERSION=2.9.1+cu128
 ARG TORCHVISION_VERSION=0.24.1+cu128
 ARG TORCHAUDIO_VERSION=2.9.1+cu128
 
+# pip's default socket timeout is 15 seconds and the pip bundled with Python
+# 3.12 cannot resume a download. A single CDN stall that long in the middle of
+# a wheel used to fail the whole first start, even on a fast line. Allow longer
+# stalls and let pip resume a broken download instead of giving up.
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=60 \
+    PIP_RETRIES=10 \
+    PIP_RESUME_RETRIES=10 \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/venv/bin:$PATH
 
@@ -27,7 +34,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m venv /opt/venv
+# pip 25.1 added resumable downloads; the venv starts with 25.0.1.
+RUN python -m venv /opt/venv \
+    && pip install --no-cache-dir "pip==25.3"
 
 # All three have to be pinned together. Pinning only torch lets pip resolve an
 # incompatible torchaudio, which fails at import with

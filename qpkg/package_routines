@@ -25,10 +25,14 @@ resolve_share() {
 }
 
 pkg_post_install() {
+    # QTS runs this hook with umask 0, so everything created below used to come
+    # out world writable, .env and the compose file included.
+    umask 022
     # qbuild keeps the builder's uid (1001 on GitHub runners, the
     # developer's own on a workstation). On a NAS that uid can belong to a
     # real user, who could then edit scripts that QTS runs as root.
     chown -R 0:0 "${SYS_QPKG_DIR}"
+    chmod -R go-w "${SYS_QPKG_DIR}"
     STACK="$(resolve_share Container)/comfyui"
     PUBLIC="$(resolve_share Public)"
     MODELS_SHARED="$PUBLIC/models"
@@ -44,10 +48,21 @@ pkg_post_install() {
     # bind mount in compose fails.
     /bin/mkdir -p "$MODELS_SHARED"
 
-    # Never overwrite an existing file, so local edits survive an upgrade.
+    # Never overwrite a file you edited, so local changes survive an upgrade.
+    # A file that still matches a copy some earlier release shipped was not
+    # edited, so it is replaced; otherwise fixes in the Dockerfile would never
+    # reach an existing install.
     for f in Dockerfile docker-compose.yml entrypoint.sh extra_model_paths.yaml; do
         if [ ! -f "$STACK/$f" ]; then
             /bin/cp "$SYS_QPKG_DIR/$f" "$STACK/$f"
+        elif ! /bin/cmp -s "$SYS_QPKG_DIR/$f" "$STACK/$f"; then
+            _sum=$(/bin/md5sum "$STACK/$f" | awk '{ print $1 }')
+            if grep -q "^$_sum  $f\$" "$SYS_QPKG_DIR/shipped-stack-files.md5"; then
+                /bin/cp "$SYS_QPKG_DIR/$f" "$STACK/$f"
+                $CMD_WLOG "ComfyUI: updated $STACK/$f to the version in this release." 4
+            else
+                $CMD_WLOG "ComfyUI: kept your edited $STACK/$f. The version in this release is $SYS_QPKG_DIR/$f." 4
+            fi
         fi
     done
     /bin/chmod +x "$STACK/entrypoint.sh"
@@ -142,6 +157,16 @@ pkg_post_install() {
     fi
 
     /bin/chown -R "$PUID:$PGID" "$STACK"
+
+    # Docker compose runs as root and takes its mounts, runtime and image from
+    # .env and the compose file, so anyone who can write those owns the NAS.
+    # Earlier releases left them world writable. Lock the stack down and give
+    # the group write access only to the folders people fill over SMB.
+    /bin/chmod -R go-w "$STACK"
+    /bin/chmod 600 "$STACK/.env"
+    for d in input output models-local; do
+        /bin/chmod -R g+w "$STACK/$d"
+    done
 
     $CMD_WLOG "ComfyUI installed. Data directory $STACK, settings in $STACK/.env. The first start builds the image and takes 15 to 30 minutes." 4
 }

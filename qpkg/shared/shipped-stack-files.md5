@@ -1,0 +1,22 @@
+# md5 of every stack file earlier releases copied into <Container>/comfyui.
+# pkg_post_install replaces a file only when it still matches one of these,
+# that is, when nobody edited it.
+1ef44ad43e85a3a8d0cf756dbfb90520  Dockerfile
+38c6dafcd5adf532bfe1aca5727be5fa  Dockerfile
+5f389b5e75d90558f1ec5d03db9c9e3a  Dockerfile
+80862572fe74c4e49915fa7cd7e802b4  Dockerfile
+84d8931937f54635adb128979d553cad  Dockerfile
+9ac2e257eb87a5108d1475fc522bdf6c  Dockerfile
+e391cb04f5b9a3e71ae15f09ede327a5  Dockerfile
+feca235b45e48e1c4b9c216c8b8f5ee3  Dockerfile
+1f29fddb17c2d50646e950d2ef347b80  docker-compose.yml
+4793f57123b72707a50a57708a54bbb1  docker-compose.yml
+6323a891a5a5a6e05ba740f9a864d78a  docker-compose.yml
+786a1999e45e5cd7838bc88e60cf8859  docker-compose.yml
+dd134e2b341322783e5a2d1068323649  docker-compose.yml
+fb63e09c8c659c8cccf3aea11b3cc243  docker-compose.yml
+fc5c74da3500834bc9300021d67a6e80  docker-compose.yml
+5d77062c098cd369c6d72b15fa2125e7  entrypoint.sh
+c852a6d6c1414de904f62e16b06224a2  entrypoint.sh
+6823bb6eeda92268bd637df8ac40afe0  extra_model_paths.yaml
+a0b91ad419bb3a623cbafa1fcb6c2d98  extra_model_paths.yaml

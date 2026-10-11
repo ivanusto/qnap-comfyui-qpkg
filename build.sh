@@ -11,7 +11,7 @@ set -e
 
 ARCH="${ARCH:-x86_64}"
 VERSION="${VERSION:-0.39.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-1}"
+BUILD_NUMBER="${BUILD_NUMBER:-2}"
 
 QBUILD=$(command -v qbuild 2>/dev/null || true)
 if [ -z "$QBUILD" ]; then

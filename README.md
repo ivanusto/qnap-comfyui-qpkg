@@ -69,6 +69,13 @@ Container Station instead.
    Watch progress in `<Container>/comfyui/logs/qpkg.log`.
 4. Open `http://<nas>:8188`.
 
+If nothing shows up in Container Station after the first start, the image build
+failed and no container was created. App Center still reports the app as
+enabled. From release 0.39.0-2 the package retries the build three times and
+writes the failure to the QTS system log (Notification Center); earlier releases
+only wrote it to `<Container>/comfyui/logs/qpkg.log`. Finished layers are cached,
+so stopping and starting the app again resumes from the step that failed.
+
 ### Matching the CUDA wheels to your driver
 
 Installation creates `<Container>/comfyui/.env`. The PyTorch wheel index there

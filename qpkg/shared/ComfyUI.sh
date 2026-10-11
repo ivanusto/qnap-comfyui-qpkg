@@ -11,6 +11,10 @@
 #      other.
 # So call Container Station's own docker binary directly.
 
+# QTS starts package scripts with umask 0, which made every file this script
+# creates world writable.
+umask 022
+
 CONF=/etc/config/qpkg.conf
 QPKG_NAME="ComfyUI"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
@@ -44,6 +48,30 @@ export HOME="$STACK"
 export DOCKER_CONFIG="$STACK/.docker"
 
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+
+# App Center reports the package as enabled even when start fails, so a failure
+# that only lands in $LOG is invisible. Put it in the QTS system event log too,
+# where the notification centre picks it up.
+notify_error() {
+    log "$*"
+    /sbin/log_tool -t 2 -a "[$QPKG_NAME] $*. Details in $LOG" >/dev/null 2>&1
+}
+
+# Build the image for the ref in $1. The first start downloads several GB from
+# PyPI and the PyTorch index, and one stalled connection is enough to fail a
+# build. BuildKit keeps every finished layer, so a retry only repeats the step
+# that failed.
+BUILD_ATTEMPTS=3
+build_image() {
+    n=1
+    while :; do
+        COMFY_REF="$1" $DOCKER compose -f "$COMPOSE_FILE" build >> "$LOG" 2>&1 && return 0
+        [ $n -ge $BUILD_ATTEMPTS ] && return 1
+        log "build attempt $n of $BUILD_ATTEMPTS failed, retrying in 30 seconds"
+        n=$((n + 1))
+        sleep 30
+    done
+}
 
 env_get() { sed -n "s/^$1=//p" "$STACK/.env" 2>/dev/null | head -1; }
 env_set() { sed -i "s/^$1=.*/$1=$2/" "$STACK/.env"; }
@@ -94,7 +122,7 @@ do_start() {
         return 1
     fi
     mkdir -p "$STACK/logs"
-    preflight || { echo "preflight failed, see $LOG"; return 1; }
+    preflight || { notify_error "preflight failed, the container was not started"; echo "preflight failed, see $LOG"; return 1; }
 
     # The image is not shipped inside the QPKG. A docker save tarball of roughly
     # 9 GB would make the package unwieldy and would have to be unpacked and
@@ -104,8 +132,8 @@ do_start() {
     IMG=$(image_name)
     if ! $DOCKER image inspect "$IMG" >/dev/null 2>&1; then
         log "image $IMG not present, building (expect 15 to 30 minutes)"
-        $DOCKER compose -f "$COMPOSE_FILE" build >> "$LOG" 2>&1 \
-            || { log "build failed, see $LOG"; return 1; }
+        build_image "$(current_ref)" \
+            || { notify_error "image build failed after $BUILD_ATTEMPTS attempts, the container was not created. Restart the app to try again"; return 1; }
         log "build complete"
     fi
 
@@ -195,8 +223,8 @@ do_upgrade() {
     # .env, so this builds and tags the new image without editing anything.
     if ! $DOCKER image inspect "$(image_name "$NEW")" >/dev/null 2>&1; then
         log "upgrade: building $(image_name "$NEW") while $OLD keeps serving (expect 15 to 30 minutes)"
-        if ! COMFY_REF="$NEW" $DOCKER compose -f "$COMPOSE_FILE" build >> "$LOG" 2>&1; then
-            log "upgrade: build of $NEW failed, still running $OLD. Source kept in $STACK/ComfyUI.prev-$NEW"
+        if ! build_image "$NEW"; then
+            notify_error "upgrade: build of $NEW failed, still running $OLD. Source kept in $STACK/ComfyUI.prev-$NEW"
             return 1
         fi
     fi
