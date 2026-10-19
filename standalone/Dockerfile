@@ -17,7 +17,7 @@
 #     Docker create a directory in its place and the container then fails.
 FROM python:3.12-slim-bookworm
 
-ARG COMFY_REF=v0.39.0
+ARG COMFY_REF=v0.42.1
 # These must match the CUDA version your NVIDIA driver reports. Check with
 # nvidia-smi and see the table in the project README.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cu128
@@ -78,6 +78,25 @@ RUN grep -vE '^(torch|torchvision|torchaudio)([=<>!~[]|$)' /opt/ComfyUI/requirem
 RUN pip install --no-cache-dir "kornia_rs==0.1.10" \
     && python -c "import kornia, kornia_rs; print('kornia', kornia.__version__, 'with kornia_rs', kornia_rs.__version__, 'OK')"
 
+# ComfyUI-Manager installs node dependencies with uv by default and fails
+# outright when uv is missing, so ship it rather than have everyone switch
+# Manager to pip. It comes this late so that adding it did not invalidate the
+# cached torch layers of existing installs.
+RUN pip install --no-cache-dir "uv==0.13.1" && uv --version
+
+# Versions that custom node requirements must never move. A requirements.txt
+# that says plain "torch" is satisfied by the pinned CUDA build, but one that
+# asks for a newer torch would otherwise pull a CUDA 13 wheel from PyPI and
+# break every node on a CUDA 12 driver. The entrypoint passes this file as a
+# constraint, so such a node fails to install instead.
+RUN pip freeze | grep -iE '^(torch|torchvision|torchaudio|comfy[-_]kitchen|comfy[-_]aimdo|kornia[-_]rs)==' > /opt/constraints.txt \
+    && cat /opt/constraints.txt
+
+# Dependencies for custom nodes live in the pip-extra bind mount, see the
+# entrypoint. Set here rather than in the entrypoint so that docker exec and
+# ComfyUI-Manager see the same path.
+ENV PYTHONPATH=/opt/pip-extra/prefix/lib/python3.12/site-packages:/opt/pip-extra
+
 COPY <<'YAML' /opt/defaults/extra_model_paths.yaml
 # Extra model search paths. Edit the copy in your /config directory, not this
 # one, and restart the container.
@@ -119,6 +138,7 @@ shared_models:
     clip_vision: clip_vision/
     embeddings: embeddings/
     upscale_models: upscale_models/
+    checkpoints: checkpoints/
     style_models: style_models/
     model_patches: model_patches/
     configs: configs/
@@ -131,6 +151,7 @@ local_models:
     loras: loras/
     unet_gguf: unet/
     clip_gguf: clip/
+    checkpoints: checkpoints/
 YAML
 
 COPY <<'SCRIPT' /usr/local/bin/entrypoint.sh
@@ -158,9 +179,54 @@ if [ -d /opt/ComfyUI/custom_nodes ] && [ -z "$(ls -A /opt/ComfyUI/custom_nodes 2
     cp /opt/defaults/custom_nodes/* /opt/ComfyUI/custom_nodes/ 2>/dev/null || true
 fi
 
-# Dependencies for custom nodes, so adding one small package does not mean
-# rebuilding the image.
-export PYTHONPATH="/opt/pip-extra:${PYTHONPATH}"
+# Dependencies for custom nodes go here, so that adding one small package does
+# not mean rebuilding the image. Packages ComfyUI-Manager installs land in the
+# container itself and are gone whenever the container is recreated, for
+# example by an image rebuild. With COMFY_NODE_REQUIREMENTS=install, every
+# custom_nodes/*/requirements.txt is installed under pip-extra instead, where it
+# survives. It runs again only when one of those files changes. --prefix rather
+# than --target, because --target ignores what the image already has and would
+# install a second copy of torch.
+# The image puts $PIP_EXTRA/prefix/lib/python3.12/site-packages and $PIP_EXTRA
+# on PYTHONPATH.
+PIP_EXTRA=/opt/pip-extra
+
+if [ "${COMFY_NODE_REQUIREMENTS:-off}" = "install" ]; then
+    STAMP="$PIP_EXTRA/.node-requirements.sha256"
+    SUM=$(for r in /opt/ComfyUI/custom_nodes/*/requirements.txt; do
+              [ -f "$r" ] && echo "$r" && cat "$r"
+          done | sha256sum | cut -d' ' -f1)
+    if [ "$SUM" != "$(cat "$STAMP" 2>/dev/null)" ]; then
+        failed=0
+        for r in /opt/ComfyUI/custom_nodes/*/requirements.txt; do
+            [ -f "$r" ] || continue
+            node=$(basename "$(dirname "$r")")
+            echo "[entrypoint] installing requirements for $node"
+            # A node that asks for another torch fails here rather than
+            # replacing the CUDA build; the others still get installed.
+            pip install --prefix "$PIP_EXTRA/prefix" --no-warn-script-location \
+                    -c /opt/constraints.txt -r "$r" \
+                || { echo "[entrypoint] $node: install failed, see above" >&2; failed=1; }
+        done
+        # polars, which ultralytics and deepdiff pull in, defaults to a runtime
+        # built for AVX2 and kills the whole process with Illegal instruction
+        # on CPUs without it. polars prefers its compat runtime when present.
+        if ! grep -qw avx2 /proc/cpuinfo; then
+            PV=$(python -c "import importlib.metadata as m; print(m.version('polars'))" 2>/dev/null || true)
+            if [ -n "$PV" ]; then
+                echo "[entrypoint] CPU lacks AVX2, adding polars-runtime-compat $PV"
+                pip install --prefix "$PIP_EXTRA/prefix" --no-warn-script-location \
+                        "polars-runtime-compat==$PV" \
+                    || { echo "[entrypoint] polars-runtime-compat: install failed" >&2; failed=1; }
+            fi
+        fi
+        # Only remember a fully successful pass, so a failure is retried on
+        # the next start.
+        [ $failed -eq 0 ] && echo "$SUM" > "$STAMP"
+    else
+        echo "[entrypoint] custom node requirements unchanged, skipping install"
+    fi
+fi
 
 # GPU preflight. If NVIDIA_DRIVER_CAPABILITIES lacks the compute capability the
 # container gets a working nvidia-smi but no libcuda.so.1, and torch reports

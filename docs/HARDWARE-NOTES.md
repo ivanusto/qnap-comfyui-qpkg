@@ -33,6 +33,16 @@ flags, so the check is accurate.
 If your NAS has a modern Intel Core or AMD Ryzen part this does not apply and
 the pin is skipped automatically.
 
+Custom nodes hit the same wall through `polars`. `ultralytics` (ComfyUI-Impact-
+Subpack) and `deepdiff` (ComfyUI-Crystools) pull in polars 2.0, whose default
+runtime package `polars-runtime-32` is built for AVX2. On the reference machine's CPU
+ComfyUI died with `Illegal instruction` in `polars/_plr.py` while loading
+Crystools, and every node after it went down too. polars prefers
+`polars-runtime-compat` whenever it is installed, so with
+`COMFY_NODE_REQUIREMENTS=install` the entrypoint adds the matching version on
+CPUs without AVX2. If you install polars some other way, add it yourself:
+`pip install --prefix /opt/pip-extra/prefix polars-runtime-compat==<polars version>`.
+
 ## 2. CUDA can stop initialising after long uptime
 
 Symptom: inside the container `cuInit()` returns `CUDA_ERROR_NOT_INITIALIZED`,
@@ -202,6 +212,15 @@ to back on the same boot, with the GPU capped at 50 W and host memory already
 fragmented, v0.38.0 and v0.39.0 took the same time warm (78 to 80 s against 77
 to 80 s), so absolute numbers on a long-running box say more about its state
 than about the ComfyUI version.
+
+v0.42.1 is the same again: `fast_disk=False` from all three loaders, and the
+guard still covers the flash decode check, which `llama.py` looks up at call
+time. On the second machine (Ryzen, 16 GB RAM, `COMFY_MEM_LIMIT=8g`, same
+12 GB card) the Krea 2 workflow with prompt expansion took 178 s cold and
+130 s warm, peaking at 11779 of 11905 MiB without an OOM. New comfy-kitchen
+kernels in the LTX and SeedVR decoders go through the same backend registry,
+which has eager implementations of them, so below cu130 they fall back to
+plain PyTorch.
 
 This machine is stuck on CUDA 12. QNAP's NVIDIA GPU Driver 6.2.2, the newest
 package available, ships driver 575.64.05, which reports CUDA 12.9, so PyTorch

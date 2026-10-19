@@ -42,6 +42,7 @@ shared_models:
     clip_vision: clip_vision/
     embeddings: embeddings/
     upscale_models: upscale_models/
+    checkpoints: checkpoints/
     style_models: style_models/
     model_patches: model_patches/
     configs: configs/
@@ -56,3 +57,4 @@ local_models:
     loras: loras/
     unet_gguf: unet/
     clip_gguf: clip/
+    checkpoints: checkpoints/

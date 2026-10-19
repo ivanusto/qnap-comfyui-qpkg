@@ -6,7 +6,7 @@
 # models-local or custom_nodes directory, and never overwrites a compose file
 # or YAML you have edited.
 
-COMFY_REF="v0.39.0"
+COMFY_REF="v0.42.1"
 
 # /share is a tmpfs. /share/Container and /share/Public are symlinks into
 # <pool>_DATA/<folder>, and the pool name differs per machine: CACHEDEV1_DATA on
@@ -42,6 +42,7 @@ pkg_post_install() {
         "$STACK/models-local/diffusion_models" "$STACK/models-local/text_encoders" \
         "$STACK/models-local/vae" "$STACK/models-local/loras" \
         "$STACK/models-local/unet" "$STACK/models-local/clip" \
+        "$STACK/models-local/checkpoints" \
         "$STACK/output" "$STACK/input" "$STACK/temp" "$STACK/logs" "$STACK/.docker"
 
     # Create the shared model folder if it is missing, otherwise the read only
@@ -124,6 +125,11 @@ pkg_post_install() {
             echo "COMFY_MEM_LIMIT=${MEM_LIMIT_GB}g"
             echo "COMFY_MEMSWAP_LIMIT=$((MEM_LIMIT_GB + 24))g"
             echo "COMFY_SHM_SIZE=2gb"
+            echo ""
+            echo "# Set to install to pip install every custom_nodes/*/requirements.txt"
+            echo "# into pip-extra at startup, again only when one of them changes."
+            echo "# Packages ComfyUI-Manager installs are gone after the next stop."
+            echo "COMFY_NODE_REQUIREMENTS=off"
             echo ""
             echo "# The torch wheels must match your driver's CUDA version."
             echo "# There is a table in the README."

@@ -1,4 +1,4 @@
-    image: comfyui-standalone:v0.39.0
+    image: comfyui-standalone:v0.42.1
     container_name: comfyui
     restart: unless-stopped
 
@@ -16,6 +16,10 @@
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - TZ=UTC
+      # Set to install to pip install every custom_nodes/*/requirements.txt into
+      # pip-extra at startup, again only when one of them changes. Packages that
+      # ComfyUI-Manager installs are lost whenever the container is recreated.
+      - COMFY_NODE_REQUIREMENTS=off
 
     ports:
       - "8188:8188"

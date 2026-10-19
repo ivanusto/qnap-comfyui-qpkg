@@ -17,7 +17,9 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.39.0 | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.39.0; v0.42.1 CPU only | Works |
+| Second machine | AMD Ryzen, 6 cores, AVX2 | same card, sm_86 | 575.64.05 / 12.9 | QuTS hero h6.1 Beta | v0.39.0 to v0.42.1 | Works |
+| TS-h1277AFX ([#1](../../issues/1)) | AMD Ryzen 7 9700X, AVX2 | RTX 5060 Ti 16 GB, sm_120 | 575.64.05 / 12.9 | 6.0.2 | v0.39.0, standalone compose | Works; ComfyUI-Manager needed uv, shipped from 0.42.1-1 |
 
 QNAP ships very different CPUs across its range, from Annapurna ARM parts to
 low-power Intel parts, newer Intel Core, and AMD Ryzen. Container Station and the NVIDIA driver
@@ -131,8 +133,57 @@ All of `.env` takes effect on package restart.
 | `COMFY_RESERVE_VRAM` | `0.5` | GB held back from ComfyUI. Raise if you hit OOM |
 | `COMFY_MEM_LIMIT` | RAM minus ZFS ARC floor minus 8 GB | From v0.35 ComfyUI treats this as total RAM. Too low makes big models slow, too high makes QuTS hero swap |
 | `COMFY_MODELS_SHARED` | `<Public>/models` | Read-only model root |
+| `COMFY_NODE_REQUIREMENTS` | `off` | `install` keeps custom node dependencies across restarts, see [Custom nodes](#custom-nodes) |
 | `PUID` / `PGID` | resolved at install | Ownership of generated files |
 | `TORCH_*` | cu128 set | Must match your driver |
+
+## Custom nodes
+
+Put custom nodes in `<Container>/comfyui/custom_nodes`, or install them with
+ComfyUI-Manager. The image ships `uv`, which Manager uses by default, so
+Manager works without switching it to pip.
+
+Python packages that Manager or `pip` install from inside the container land in
+the container itself. Stopping the app removes the container, so they are gone
+on the next start, and the nodes that need them fail to import. To keep them,
+set this in `.env` and restart the app:
+
+```sh
+COMFY_NODE_REQUIREMENTS=install
+```
+
+At startup the entrypoint then runs `pip install` for every
+`custom_nodes/*/requirements.txt` into `pip-extra/prefix`, which is on
+`PYTHONPATH` and survives restarts and upgrades. It reruns only when one of
+those files changes; look for `installing requirements for <node>` in the
+container log. The installed `torch`, `torchvision`, `torchaudio`,
+`comfy-kitchen`, `comfy-aimdo` and `kornia_rs` are passed as constraints, so a
+node that asks for a different torch fails to install, with
+`<node>: install failed` in the log, instead of replacing the CUDA 12 build and
+breaking everything else. A failed node is retried on the next start. On CPUs
+without AVX2 it also adds `polars-runtime-compat`, because the default polars
+runtime crashes them, see section 1 of
+[docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
+
+Tested with comfyui_controlnet_aux, ComfyUI-Impact-Pack,
+ComfyUI-Impact-Subpack, ComfyUI-Crystools and ComfyUI-VideoHelperSuite on the
+reference machine's CPU, which has no AVX: all five load with no import
+failures, the first start spent several minutes installing their
+requirements, and a fresh container afterwards skipped the install and loaded
+them in under two seconds.
+
+Some packs need more than `requirements.txt`, for example an `install.py` that
+downloads extra files. Run those once from the Manager or with
+`docker exec -it comfyui python custom_nodes/<pack>/install.py`. A single
+package installed with
+`docker exec comfyui pip install --prefix /opt/pip-extra/prefix -c /opt/constraints.txt <package>`
+also persists.
+
+Model files for `CheckpointLoaderSimple` go in `checkpoints/` under the shared
+model folder or under `models-local`. Releases before 0.42.1-1 did not list
+that folder in `extra_model_paths.yaml` ([#3](../../issues/3)); if you edited
+your copy, add `checkpoints: checkpoints/` to both blocks yourself, since the
+package never overwrites an edited file.
 
 ## Upgrading ComfyUI
 
@@ -141,7 +192,7 @@ Reinstalling the package does **not** change the ComfyUI version, because
 
 ```sh
 QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
-sh $QPKG/ComfyUI.sh upgrade v0.39.0
+sh $QPKG/ComfyUI.sh upgrade v0.42.1
 ```
 
 Pick the tag from the upstream
@@ -160,7 +211,7 @@ A failed download or build changes nothing. Progress goes to
 build; if yours might drop, run it detached:
 
 ```sh
-setsid sh $QPKG/ComfyUI.sh upgrade v0.39.0 > /dev/null 2>&1 < /dev/null &
+setsid sh $QPKG/ComfyUI.sh upgrade v0.42.1 > /dev/null 2>&1 < /dev/null &
 ```
 
 The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
@@ -203,6 +254,25 @@ the startup log. It does not edit any upstream file, so it survives
 v0.37.0-1, you can leave it or undo it; the next `upgrade` replaces that file
 anyway. The standalone compose file does not install the guard, so copy
 `qpkg/shared/qnap_cu12_guard.py` into its `custom_nodes` yourself.
+
+**Going from v0.39.0 to v0.42.1:** upstream migration
+`0009_created_at_from_mtime` redates scanned asset records and has no
+downgrade. It only matters if you enabled the assets system yourself: the
+package does not pass `--enable-assets`, and then ComfyUI does not create
+`user/comfyui.db` at all. Measured on a fresh 0.39.0-2 install: `rollback` to
+v0.39.0 took 57 s and `upgrade` back took 107 s, neither rebuilding anything;
+the second figure includes restarts while CUDA failed to initialise on a
+fragmented host, see below.
+If you do use assets, expect v0.39.0 to log an unknown revision as in the 0007
+case below.
+The Python dependencies move a little (comfy-kitchen 0.2.39, comfy-aimdo 0.5.6,
+frontend 1.55.18). `llama.py` still looks the flash decode check up at call
+time, so the CUDA 12 guard needs nothing new. The image now also has `uv` and a
+constraints file for custom node requirements, see [Custom nodes](#custom-nodes).
+To get those on an existing install, install the 0.42.1-1 package first, which
+replaces the stack `Dockerfile`, `entrypoint.sh` and `extra_model_paths.yaml`
+unless you edited them, and then run `upgrade v0.42.1`, which builds the image
+from them.
 
 **Going from v0.38.0 to v0.39.0:** no new database migration, so `rollback`
 works. The Python dependencies barely move (comfy-kitchen 0.2.37, frontend

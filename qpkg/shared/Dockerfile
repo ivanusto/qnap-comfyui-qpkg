@@ -6,7 +6,7 @@
 # waste. The driver side libcuda.so.1 is injected at runtime by nvidia-runtime.
 FROM python:3.12-slim-bookworm
 
-ARG COMFY_REF=v0.39.0
+ARG COMFY_REF=v0.42.1
 # The torch wheel index has to match the driver shipped by the NVIDIA_GPU_DRV
 # package. Read the CUDA version out of nvidia-smi and pick wheels no newer
 # than that. There is a table in the README.
@@ -76,6 +76,25 @@ RUN if grep -qw avx2 /proc/cpuinfo; then \
         pip install --no-cache-dir "kornia_rs==0.1.10"; \
     fi \
     && python -c "import kornia, kornia_rs; print('kornia', kornia.__version__, 'with kornia_rs', kornia_rs.__version__, 'OK')"
+
+# ComfyUI-Manager installs node dependencies with uv by default and fails
+# outright when uv is missing, so ship it rather than have everyone switch
+# Manager to pip. It comes this late so that adding it did not invalidate the
+# cached torch layers of existing installs.
+RUN pip install --no-cache-dir "uv==0.13.1" && uv --version
+
+# Versions that custom node requirements must never move. A requirements.txt
+# that says plain "torch" is satisfied by the pinned CUDA build, but one that
+# asks for a newer torch would otherwise pull a CUDA 13 wheel from PyPI and
+# break every node on a CUDA 12 driver. The entrypoint passes this file as a
+# constraint, so such a node fails to install instead.
+RUN pip freeze | grep -iE '^(torch|torchvision|torchaudio|comfy[-_]kitchen|comfy[-_]aimdo|kornia[-_]rs)==' > /opt/constraints.txt \
+    && cat /opt/constraints.txt
+
+# Dependencies for custom nodes live in the pip-extra bind mount, see the
+# entrypoint. Set here rather than in the entrypoint so that docker exec and
+# ComfyUI-Manager see the same path.
+ENV PYTHONPATH=/opt/pip-extra/prefix/lib/python3.12/site-packages:/opt/pip-extra
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

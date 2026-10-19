@@ -18,7 +18,7 @@ umask 022
 CONF=/etc/config/qpkg.conf
 QPKG_NAME="ComfyUI"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
-DEFAULT_REF=v0.39.0
+DEFAULT_REF=v0.42.1
 
 # Container Station's install path varies by machine. Ask qpkg.conf first, then
 # fall back to scanning /share. This runs again inside preflight, because at
