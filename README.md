@@ -17,7 +17,7 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2 | v0.34.3 to v0.39.0; v0.42.1 CPU only | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2; QuTS hero h6.1 Beta from v0.43.0 | v0.34.3 to v0.39.0, v0.43.0; v0.42.1 CPU only | Works |
 | Second machine | AMD Ryzen, 6 cores, AVX2 | same card, sm_86 | 575.64.05 / 12.9 | QuTS hero h6.1 Beta | v0.39.0 to v0.42.1 | Works |
 | TS-h1277AFX ([#1](../../issues/1)) | AMD Ryzen 7 9700X, AVX2 | RTX 5060 Ti 16 GB, sm_120 | 575.64.05 / 12.9 | 6.0.2 | v0.39.0, standalone compose | Works; ComfyUI-Manager needed uv, shipped from 0.42.1-1 |
 
@@ -157,7 +157,7 @@ At startup the entrypoint then runs `pip install` for every
 `PYTHONPATH` and survives restarts and upgrades. It reruns only when one of
 those files changes; look for `installing requirements for <node>` in the
 container log. The installed `torch`, `torchvision`, `torchaudio`,
-`comfy-kitchen`, `comfy-aimdo` and `kornia_rs` are passed as constraints, so a
+`comfy-kitchen`, `comfy-aimdo`, `kornia` and `kornia_rs` are passed as constraints, so a
 node that asks for a different torch fails to install, with
 `<node>: install failed` in the log, instead of replacing the CUDA 12 build and
 breaking everything else. A failed node is retried on the next start. On CPUs
@@ -192,7 +192,7 @@ Reinstalling the package does **not** change the ComfyUI version, because
 
 ```sh
 QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
-sh $QPKG/ComfyUI.sh upgrade v0.42.1
+sh $QPKG/ComfyUI.sh upgrade v0.43.0
 ```
 
 Pick the tag from the upstream
@@ -211,7 +211,7 @@ A failed download or build changes nothing. Progress goes to
 build; if yours might drop, run it detached:
 
 ```sh
-setsid sh $QPKG/ComfyUI.sh upgrade v0.42.1 > /dev/null 2>&1 < /dev/null &
+setsid sh $QPKG/ComfyUI.sh upgrade v0.43.0 > /dev/null 2>&1 < /dev/null &
 ```
 
 The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
@@ -249,11 +249,56 @@ cu128.
 From v0.37.0-2 the package installs `custom_nodes/qnap_cu12_guard.py`, which
 turns that decode path off at startup when PyTorch is older than cu130 and does
 nothing otherwise. Look for `qnap_cu12_guard: PyTorch built for CUDA 12.8` in
-the startup log. It does not edit any upstream file, so it survives
-`upgrade`. If you applied the one-line change to `llama.py` suggested for
+the startup log. From 0.43.0-1 it switches off the whole comfy-kitchen CUDA
+extension instead, because other text generation paths call its kernels
+directly; see the v0.43.0 notes below. It does not edit any upstream file, so
+it survives `upgrade`. If you applied the one-line change to `llama.py` suggested for
 v0.37.0-1, you can leave it or undo it; the next `upgrade` replaces that file
 anyway. The standalone compose file does not install the guard, so copy
 `qpkg/shared/qnap_cu12_guard.py` into its `custom_nodes` yourself.
+
+**Going from v0.42.1 to v0.43.0:** no new database migration, so `rollback`
+works. Coming straight from v0.39.0 crosses `0009_created_at_from_mtime`, see
+the v0.42.1 notes below; with assets off, as the package ships, that changes
+nothing. The Python dependencies move a little (comfy-kitchen 0.2.40,
+comfy-aimdo 0.6.0, frontend 1.57.4, `Pillow>=10.1.0`). Upstream adds
+`--enable-agent` and `--disable-product-tips`; the package passes neither, and
+does not install `agent_requirements.txt`.
+
+Two fixes in 0.43.0-1 matter more than the version bump:
+
+- **The CUDA 12 guard now covers Qwen3.5 text generation.** On cu128 the
+  FLUX 3 Klein prompt upsampler, which runs a Qwen3.5 text encoder, failed with
+  `RuntimeError: deltanet_conv_step_deferred launch rejected` on v0.42.1 and
+  v0.43.0 alike, because `comfy/text_encoders/qwen35.py` calls the comfy-kitchen
+  DeltaNet kernels without asking first. The guard now marks the comfy-kitchen
+  CUDA extension unavailable below cu130, so every comfy-kitchen call falls back
+  to its PyTorch implementation, including call sites added by later releases.
+  The upsampler works but is slow on that fallback, about 1.1 s per generated
+  token on the reference machine. Image generation itself does not use the
+  extension below cu130, so its speed is unchanged.
+- **Builds on CPUs without AVX2 work again.** `kornia` 0.9.0, released on
+  23 October 2026, requires `kornia_rs` 0.2.0, so pinning `kornia_rs` 0.1.10
+  alone broke the import with `cannot import name 'io' from 'kornia_rs'`. This
+  hit any fresh image build of 0.42.1-1 and the standalone compose file on
+  such CPUs. `kornia_rs` 0.2.0 runs on them again, so the Dockerfile now only
+  replaces a resolved 0.1.11 to 0.1.x, together with `kornia` 0.8.3, and passes
+  `kornia` as a custom node constraint as well.
+
+Install the 0.43.0-1 package before `upgrade v0.43.0`. It also lists the
+0.42.1-1 stack files as unedited, which that release forgot, so an untouched
+0.42.1-1 `Dockerfile` is now replaced on reinstall. If you edited yours, take
+the kornia block from `<QPKG>/Dockerfile` by hand.
+
+Measured on the reference machine on one boot, GPU capped at 50 W, against
+v0.39.0 on the same boot: a plain Krea 2 workflow at 1344x896 took 76.1 to
+76.7 s warm against 76.4 s. The Krea 2 workflow with prompt expansion took 113
+to 119 s against 102 s, but v0.43.0 also generated longer expansions (128 to
+143 words against 96, upstream fixed top-p sampling in this release), so the
+two are not directly comparable. FLUX 3 Klein int8 with the upsampler, which
+could not run before, took 691 s end to end, most of it in the upsampler. All
+three loaders still log `fast_disk=False`. `rollback` to v0.39.0 took 92 s and
+`upgrade` back took 59 s, neither rebuilding anything.
 
 **Going from v0.39.0 to v0.42.1:** upstream migration
 `0009_created_at_from_mtime` redates scanned asset records and has no

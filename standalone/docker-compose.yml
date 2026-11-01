@@ -49,7 +49,7 @@ services:
       # block, so a single $ would be eaten before Docker ever sees it.
       context: .
       args:
-        COMFY_REF: v0.42.1
+        COMFY_REF: v0.43.0
         TORCH_INDEX: https://download.pytorch.org/whl/cu128
         TORCH_VERSION: 2.9.1+cu128
         TORCHVISION_VERSION: 0.24.1+cu128
@@ -65,16 +65,12 @@ services:
         # Differences from the QPKG variant one directory over:
         #   - ComfyUI's source is baked into the image rather than bind mounted, because
         #     there is no install hook to fetch it. Upgrading means rebuilding.
-        #   - kornia_rs is pinned unconditionally rather than only on CPUs without AVX2.
-        #     The build still happens on your own NAS so a conditional would work, but
-        #     an unconditional pin keeps the image identical everywhere and costs
-        #     nothing: kornia_rs is only used for image IO.
         #   - The entrypoint seeds a default extra_model_paths.yaml into /config on
         #     first run, because bind mounting a file that does not exist yet makes
         #     Docker create a directory in its place and the container then fails.
         FROM python:3.12-slim-bookworm
 
-        ARG COMFY_REF=v0.42.1
+        ARG COMFY_REF=v0.43.0
         # These must match the CUDA version your NVIDIA driver reports. Check with
         # nvidia-smi and see the table in the project README.
         ARG TORCH_INDEX=https://download.pytorch.org/whl/cu128
@@ -129,10 +125,24 @@ services:
             && pip install --no-cache-dir -r /tmp/req.txt \
             && python -c "import comfy_aimdo.control, comfy_kitchen; print('aimdo/kitchen import OK')"
 
-        # kornia_rs 0.1.13 and newer will not run on CPUs without AVX2, such as the
-        # low-power parts QNAP uses in several models. The failure is a fatal Illegal instruction
-        # reported against an unrelated file, with no warning from pip.
-        RUN pip install --no-cache-dir "kornia_rs==0.1.10" \
+        # CPUs without AVX2 (some low-power parts stop at sse4_2) cannot execute the
+        # kornia_rs wheels from 0.1.13 to 0.1.15. The failure is
+        #   Fatal Python error: Illegal instruction
+        # reported against comfy_extras/nodes_post_processing.py, which merely imports
+        # kornia, and pip gives no hint at all. kornia_rs 0.2.0 runs on those CPUs
+        # again, and kornia 0.9.0 requires it, so pinning kornia_rs 0.1.10 on its own
+        # now breaks the import instead. Only a resolved 0.1.11 to 0.1.x is replaced,
+        # together with the last kornia that accepts 0.1.10.
+        # /proc/cpuinfo inside a container reflects the host CPU, so this check is
+        # accurate at build time, and the build always runs on your own NAS.
+        RUN if grep -qw avx2 /proc/cpuinfo; then \
+                echo "CPU has AVX2, keeping resolved kornia_rs"; \
+            elif python -c "import sys, importlib.metadata as m; v = tuple(int(x) for x in m.version('kornia_rs').split('.')[:3]); sys.exit(0 if (0, 1, 11) <= v < (0, 2, 0) else 1)"; then \
+                echo "CPU lacks AVX2 and kornia_rs is in the 0.1.11 to 0.1.x range, pinning the last known-good pair"; \
+                pip install --no-cache-dir "kornia==0.8.3" "kornia_rs==0.1.10"; \
+            else \
+                echo "CPU lacks AVX2, resolved kornia_rs is outside the 0.1.11 to 0.1.x range, keeping it"; \
+            fi \
             && python -c "import kornia, kornia_rs; print('kornia', kornia.__version__, 'with kornia_rs', kornia_rs.__version__, 'OK')"
 
         # ComfyUI-Manager installs node dependencies with uv by default and fails
@@ -146,7 +156,7 @@ services:
         # asks for a newer torch would otherwise pull a CUDA 13 wheel from PyPI and
         # break every node on a CUDA 12 driver. The entrypoint passes this file as a
         # constraint, so such a node fails to install instead.
-        RUN pip freeze | grep -iE '^(torch|torchvision|torchaudio|comfy[-_]kitchen|comfy[-_]aimdo|kornia[-_]rs)==' > /opt/constraints.txt \
+        RUN pip freeze | grep -iE '^(torch|torchvision|torchaudio|comfy[-_]kitchen|comfy[-_]aimdo|kornia|kornia[-_]rs)==' > /opt/constraints.txt \
             && cat /opt/constraints.txt
 
         # Dependencies for custom nodes live in the pip-extra bind mount, see the
@@ -313,7 +323,7 @@ services:
         WORKDIR /opt/ComfyUI
         ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
-    image: comfyui-standalone:v0.42.1
+    image: comfyui-standalone:v0.43.0
     container_name: comfyui
     restart: unless-stopped
 

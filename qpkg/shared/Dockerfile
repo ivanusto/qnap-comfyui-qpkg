@@ -6,7 +6,7 @@
 # waste. The driver side libcuda.so.1 is injected at runtime by nvidia-runtime.
 FROM python:3.12-slim-bookworm
 
-ARG COMFY_REF=v0.42.1
+ARG COMFY_REF=v0.43.0
 # The torch wheel index has to match the driver shipped by the NVIDIA_GPU_DRV
 # package. Read the CUDA version out of nvidia-smi and pick wheels no newer
 # than that. There is a table in the README.
@@ -61,19 +61,24 @@ RUN grep -vE '^(torch|torchvision|torchaudio)([=<>!~[]|$)' /tmp/requirements.txt
     && pip install --no-cache-dir -r /tmp/req-notorch.txt \
     && python -c "import comfy_aimdo.control, comfy_kitchen; print('aimdo/kitchen import OK')"
 
-# CPUs without AVX2 (some low-power parts stop at sse4_2) cannot
-# execute the kornia_rs wheels from 0.1.13 onward. The failure is
+# CPUs without AVX2 (some low-power parts stop at sse4_2) cannot execute the
+# kornia_rs wheels from 0.1.13 to 0.1.15. The failure is
 #   Fatal Python error: Illegal instruction
 # reported against comfy_extras/nodes_post_processing.py, which merely imports
-# kornia, and pip gives no hint at all.
+# kornia, and pip gives no hint at all. kornia_rs 0.2.0 runs on those CPUs
+# again, and kornia 0.9.0 requires it, so pinning kornia_rs 0.1.10 on its own
+# now breaks the import instead. Only a resolved 0.1.11 to 0.1.x is replaced,
+# together with the last kornia that accepts 0.1.10.
 # /proc/cpuinfo inside a container reflects the host CPU, so this check is
 # accurate at build time. Downgrading on an AVX2 machine would be harmless but
 # pointless, hence the conditional.
 RUN if grep -qw avx2 /proc/cpuinfo; then \
         echo "CPU has AVX2, keeping resolved kornia_rs"; \
+    elif python -c "import sys, importlib.metadata as m; v = tuple(int(x) for x in m.version('kornia_rs').split('.')[:3]); sys.exit(0 if (0, 1, 11) <= v < (0, 2, 0) else 1)"; then \
+        echo "CPU lacks AVX2 and kornia_rs is in the 0.1.11 to 0.1.x range, pinning the last known-good pair"; \
+        pip install --no-cache-dir "kornia==0.8.3" "kornia_rs==0.1.10"; \
     else \
-        echo "CPU lacks AVX2, pinning kornia_rs to the last known-good build"; \
-        pip install --no-cache-dir "kornia_rs==0.1.10"; \
+        echo "CPU lacks AVX2, resolved kornia_rs is outside the 0.1.11 to 0.1.x range, keeping it"; \
     fi \
     && python -c "import kornia, kornia_rs; print('kornia', kornia.__version__, 'with kornia_rs', kornia_rs.__version__, 'OK')"
 
@@ -88,7 +93,7 @@ RUN pip install --no-cache-dir "uv==0.13.1" && uv --version
 # asks for a newer torch would otherwise pull a CUDA 13 wheel from PyPI and
 # break every node on a CUDA 12 driver. The entrypoint passes this file as a
 # constraint, so such a node fails to install instead.
-RUN pip freeze | grep -iE '^(torch|torchvision|torchaudio|comfy[-_]kitchen|comfy[-_]aimdo|kornia[-_]rs)==' > /opt/constraints.txt \
+RUN pip freeze | grep -iE '^(torch|torchvision|torchaudio|comfy[-_]kitchen|comfy[-_]aimdo|kornia|kornia[-_]rs)==' > /opt/constraints.txt \
     && cat /opt/constraints.txt
 
 # Dependencies for custom nodes live in the pip-extra bind mount, see the

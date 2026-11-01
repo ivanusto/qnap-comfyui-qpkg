@@ -6,14 +6,15 @@ help you tell which findings should generalise and which should not.
 
 Reference machine: a QNAP NAS with an 8-core x86 CPU without AVX, 62.5 GB RAM,
 and a 12 GB NVIDIA card (sm_86, 70 W), driver 575.64.05 / CUDA 12.9,
-QTS 6.0.2, Container Station 3.1.2 (3.1.4 from ComfyUI v0.35.1 on), storage on
+QTS 6.0.2 (QuTS hero h6.1 Beta from ComfyUI v0.43.0 on), Container Station
+3.1.2 (3.1.4 from ComfyUI v0.35.1 on), storage on
 a tiered ZFS pool.
 
 ## 1. CPUs without AVX2 crash, and the traceback points at the wrong file
 
 The reference machine's CPU is a low-power x86 part whose `/proc/cpuinfo` flags stop at `sse4_2`:
-no AVX at all, let alone AVX2. The `kornia_rs` wheels from 0.1.13 onward contain
-instructions it cannot execute.
+no AVX at all, let alone AVX2. The `kornia_rs` wheels from 0.1.13 to 0.1.15
+contain instructions it cannot execute.
 
 The failure is `Fatal Python error: Illegal instruction`. It has three layers of
 disguise:
@@ -25,10 +26,17 @@ disguise:
 - The output is a fatal interpreter dump rather than a Python exception, so it
   reads like a GPU or memory problem.
 
-Versions 0.1.10 and older are fine, and `kornia` 0.8.3 accepts 0.1.10 without a
-dependency conflict. The Dockerfile checks for `avx2` in `/proc/cpuinfo` at
-build time and only pins when it is absent. Container builds see the host CPU
-flags, so the check is accurate.
+Versions 0.1.10 and older are fine, and so is 0.2.0, which imports and runs on
+the reference machine. 0.1.11 and 0.1.12 were never tested, so they are
+treated as bad. `kornia` 0.9.0 requires `kornia_rs` 0.2.0 and fails to import
+against 0.1.10 with `cannot import name 'io' from 'kornia_rs'`, so the two have
+to move together: the last `kornia` that accepts 0.1.10 is 0.8.3. The
+Dockerfile checks for `avx2` in `/proc/cpuinfo` at build time and, only when
+it is absent and pip resolved a `kornia_rs` from 0.1.11 to 0.1.x, installs
+`kornia` 0.8.3 with `kornia_rs` 0.1.10. Container builds see the host CPU
+flags, so the check is accurate. Before 0.43.0-1 the package pinned
+`kornia_rs` 0.1.10 on its own, which broke every build after `kornia` 0.9.0
+came out.
 
 If your NAS has a modern Intel Core or AMD Ryzen part this does not apply and
 the pin is skipped automatically.
@@ -221,6 +229,16 @@ time. On the second machine (Ryzen, 16 GB RAM, `COMFY_MEM_LIMIT=8g`, same
 kernels in the LTX and SeedVR decoders go through the same backend registry,
 which has eager implementations of them, so below cu130 they fall back to
 plain PyTorch.
+
+v0.43.0 still logs `fast_disk=False` from every loader. Run on one boot with
+the GPU capped at 50 W, a plain Krea 2 workflow at 1344x896 took 76.1 to 76.7 s
+warm on v0.43.0 against 76.4 s on v0.39.0, with `nvidia-smi` peaking around
+11.2 GB. The Qwen3.5 text encoder used by the FLUX 3 Klein prompt upsampler
+calls comfy-kitchen's DeltaNet kernels directly, which a cu128 build cannot
+launch, so the guard now disables the comfy-kitchen CUDA extension as a whole.
+The upsampler then runs on the PyTorch fallback at about 1.1 s per token: 345
+tokens took about 6 minutes 20 seconds, and the full FLUX 3 Klein int8
+workflow took 691 s.
 
 This machine is stuck on CUDA 12. QNAP's NVIDIA GPU Driver 6.2.2, the newest
 package available, ships driver 575.64.05, which reports CUDA 12.9, so PyTorch
