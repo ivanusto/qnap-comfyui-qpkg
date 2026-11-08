@@ -2,3 +2,6 @@
 build/
 *.qpkg
 *.qpkg.md5
+
+# Claude Code per-user permissions (may contain secrets)
+.claude/settings.local.json
