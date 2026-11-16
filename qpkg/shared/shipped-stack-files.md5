@@ -1,6 +1,7 @@
 # md5 of every stack file earlier releases copied into <Container>/comfyui.
 # pkg_post_install replaces a file only when it still matches one of these,
 # that is, when nobody edited it.
+0e0a48a0cbd26aead23d324664e059ad  Dockerfile
 1ef44ad43e85a3a8d0cf756dbfb90520  Dockerfile
 38c6dafcd5adf532bfe1aca5727be5fa  Dockerfile
 5f389b5e75d90558f1ec5d03db9c9e3a  Dockerfile
@@ -14,6 +15,7 @@ feca235b45e48e1c4b9c216c8b8f5ee3  Dockerfile
 1322a17eb0ca931de290fa2864e66760  docker-compose.yml
 1f29fddb17c2d50646e950d2ef347b80  docker-compose.yml
 4793f57123b72707a50a57708a54bbb1  docker-compose.yml
+4cdef25113e23a6a485bdf89b88dd391  docker-compose.yml
 6323a891a5a5a6e05ba740f9a864d78a  docker-compose.yml
 786a1999e45e5cd7838bc88e60cf8859  docker-compose.yml
 dd134e2b341322783e5a2d1068323649  docker-compose.yml

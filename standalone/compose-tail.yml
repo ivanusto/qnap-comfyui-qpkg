@@ -1,4 +1,4 @@
-    image: comfyui-standalone:v0.43.0
+    image: comfyui-standalone:v0.45.0
     container_name: comfyui
     restart: unless-stopped
 

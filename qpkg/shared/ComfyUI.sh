@@ -18,7 +18,7 @@ umask 022
 CONF=/etc/config/qpkg.conf
 QPKG_NAME="ComfyUI"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
-DEFAULT_REF=v0.43.0
+DEFAULT_REF=v0.45.0
 
 # Container Station's install path varies by machine. Ask qpkg.conf first, then
 # fall back to scanning /share. This runs again inside preflight, because at
@@ -217,6 +217,14 @@ do_upgrade() {
             log "upgrade: $NEW tarball has no main.py, nothing changed"
             return 1
         fi
+        # tar run as root keeps the tarball's owner (0:0) and group-writable
+        # modes, and on QuTS hero the top directory came out 0777. Give the
+        # tree the same owner and modes as a fresh install.
+        PUID=$(env_get PUID)
+        PGID=$(env_get PGID)
+        [ -n "$PUID" ] && [ -n "$PGID" ] && \
+            chown -R "$PUID:$PGID" "$STACK/ComfyUI.prev-$NEW" 2>/dev/null
+        chmod -R go-w "$STACK/ComfyUI.prev-$NEW"
     fi
 
     # Build while the old container keeps serving. The shell variable wins over

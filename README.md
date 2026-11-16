@@ -17,7 +17,7 @@ See [Reporting your hardware](#reporting-your-hardware).
 
 | NAS | CPU | GPU | Driver / CUDA | QTS | ComfyUI | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2; QuTS hero h6.1 Beta from v0.43.0 | v0.34.3 to v0.39.0, v0.43.0; v0.42.1 CPU only | Works |
+| Reference machine | x86, 8 cores, no AVX | 12 GB, sm_86 | 575.64.05 / 12.9 | 6.0.2; QuTS hero h6.1 Beta from v0.43.0 | v0.34.3 to v0.39.0, v0.43.0, v0.45.0; v0.42.1 CPU only | Works |
 | Second machine | AMD Ryzen, 6 cores, AVX2 | same card, sm_86 | 575.64.05 / 12.9 | QuTS hero h6.1 Beta | v0.39.0 to v0.42.1 | Works |
 | TS-h1277AFX ([#1](../../issues/1)) | AMD Ryzen 7 9700X, AVX2 | RTX 5060 Ti 16 GB, sm_120 | 575.64.05 / 12.9 | 6.0.2 | v0.39.0, standalone compose | Works; ComfyUI-Manager needed uv, shipped from 0.42.1-1 |
 
@@ -192,7 +192,7 @@ Reinstalling the package does **not** change the ComfyUI version, because
 
 ```sh
 QPKG=$(getcfg ComfyUI Install_Path -f /etc/config/qpkg.conf)
-sh $QPKG/ComfyUI.sh upgrade v0.43.0
+sh $QPKG/ComfyUI.sh upgrade v0.45.0
 ```
 
 Pick the tag from the upstream
@@ -211,7 +211,7 @@ A failed download or build changes nothing. Progress goes to
 build; if yours might drop, run it detached:
 
 ```sh
-setsid sh $QPKG/ComfyUI.sh upgrade v0.43.0 > /dev/null 2>&1 < /dev/null &
+setsid sh $QPKG/ComfyUI.sh upgrade v0.45.0 > /dev/null 2>&1 < /dev/null &
 ```
 
 The previous version stays on disk as `ComfyUI.prev-<tag>` plus its image, so
@@ -256,6 +256,51 @@ it survives `upgrade`. If you applied the one-line change to `llama.py` suggeste
 v0.37.0-1, you can leave it or undo it; the next `upgrade` replaces that file
 anyway. The standalone compose file does not install the guard, so copy
 `qpkg/shared/qnap_cu12_guard.py` into its `custom_nodes` yourself.
+
+**Going from v0.43.0 to v0.45.0:** no new database migration, so `rollback`
+works. The Python dependencies barely move (comfy-kitchen 0.2.41, frontend
+1.58.5, workflow templates 0.11.105); the torch trio and comfy-aimdo 0.6.0 are
+unchanged. comfy-kitchen 0.2.41 adds an INT8 decode cache that Qwen 3.x text
+generation uses when it is available, and its availability check reads the
+same `_EXT_AVAILABLE` flag, so the CUDA 12 guard covers it with no change.
+Upstream also speeds up Qwen 3.x text generation and fixes a crash when an fp8
+Qwen model generates text.
+
+From v0.45.0 upstream turns two feature flags on by default, `local_web_sso`
+and `partner_node_token`, so the frontend offers a "Continue with SSO" sign-in
+to Comfy Cloud for partner nodes. If you do not want the option, add
+`--feature-flag` and `local_web_sso=false` to the `command:` list in
+`docker-compose.yml`. The package leaves the upstream default alone.
+
+Install the 0.45.0-1 package before `upgrade v0.45.0`. It lists the 0.43.0-1
+`Dockerfile` and `docker-compose.yml` as unedited, so untouched copies are
+replaced on reinstall; the only change in them is the default `COMFY_REF`.
+
+0.45.0-1 also fixes the ownership of the source tree that `upgrade` downloads.
+Run as root, `tar` kept the tarball's owner (0:0) and group-writable modes, and
+on QuTS hero the top directory came out world writable. Earlier releases hid
+this whenever the package was reinstalled after an upgrade, because installing
+resets the whole stack. `upgrade` now gives the new tree `PUID:PGID` from
+`.env` and removes group and other write access, as a fresh install does.
+
+The `__pycache__` folders ComfyUI writes at runtime still show up as `0777`.
+That is how QNAP shared folders work, not something the package sets: the
+share carries a default ACL, and under a default ACL Linux ignores the umask,
+so Python's `mkdir(0o777)` keeps every bit. Who can actually write there is
+decided by the shared folder permissions in Control Panel, which already
+apply to the whole stack. Keep the Container share limited to administrators.
+
+Measured on the reference machine on one boot, GPU capped at 50 W, with the
+same seeds on both versions: a plain Krea 2 workflow at 1344x896 took 76.9 s
+warm against 77.1 to 77.4 s on v0.43.0, and the Krea 2 workflow with
+`TextGenerate` prompt expansion took 104.3 and 109.6 s against 103.1 and
+109.2 s. FLUX 3 Klein int8 with the prompt upsampler produced the identical
+280-word caption on both, but took 857 to 878 s against 761 s: the upsampler
+569 s against 528 s and sampling 189 s against 150 s. The two v0.45.0 runs
+came before and after the v0.43.0 one, so this looks like the version rather
+than the machine, though it was not isolated further. `upgrade` with the image
+already built took 85 s, and 96 s when it also downloaded the source;
+`rollback` to v0.43.0 took about 115 s, neither rebuilding anything.
 
 **Going from v0.42.1 to v0.43.0:** no new database migration, so `rollback`
 works. Coming straight from v0.39.0 crosses `0009_created_at_from_mtime`, see
